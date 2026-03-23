@@ -146,8 +146,8 @@ async function handleMessage(event: any, channelId: string) {
   const lineUserId: string = event.source.userId
   if (!lineUserId) return
 
-  // Resolve friend
-  const { data: friend } = await supabase
+  // Resolve or create friend
+  let { data: friend } = await supabase
     .from('friends')
     .select('id')
     .eq('channel_id', channelId)
@@ -155,8 +155,18 @@ async function handleMessage(event: any, channelId: string) {
     .single()
 
   if (!friend) {
-    console.warn('[handleMessage] friend not found for', lineUserId)
-    return
+    // Auto-create friend record for existing followers not yet in DB
+    let profile: { displayName: string; pictureUrl?: string }
+    try {
+      profile = await lineClient.getProfile(lineUserId)
+    } catch {
+      profile = { displayName: 'Unknown' }
+    }
+    friend = await upsertFriend(channelId, lineUserId, profile)
+    if (!friend) {
+      console.error('[handleMessage] could not create friend for', lineUserId)
+      return
+    }
   }
 
   const message = event.message
