@@ -10,7 +10,7 @@ interface ChatFriend {
   display_name: string;
   picture_url: string | null;
   chat_messages: {
-    content: string;
+    content: { text?: string; data?: string } | string;
     created_at: string;
     direction: string;
   }[];
@@ -20,10 +20,14 @@ interface Message {
   id: string;
   friend_id: string;
   direction: "inbound" | "outbound";
-  content: string;
-  sent_at: string;
+  content: { text?: string; data?: string } | string;
   created_at: string;
   message_type: string;
+}
+
+function getContentText(content: { text?: string; data?: string } | string): string {
+  if (typeof content === "string") return content;
+  return content?.text ?? content?.data ?? "";
 }
 
 function formatTime(dateStr: string): string {
@@ -272,7 +276,7 @@ export default function ChatPage() {
                       {lastMsg && (
                         <p className="truncate text-xs text-gray-500">
                           {lastMsg.direction === "outbound" ? "あなた: " : ""}
-                          {lastMsg.content}
+                          {getContentText(lastMsg.content)}
                         </p>
                       )}
                     </div>
@@ -353,7 +357,7 @@ export default function ChatPage() {
                           : "bg-gray-100 text-gray-900"
                       }`}
                     >
-                      <p>{msg.content}</p>
+                      <p>{getContentText(msg.content)}</p>
                       <p
                         className={`mt-1 text-xs ${
                           msg.direction === "outbound"
@@ -361,7 +365,7 @@ export default function ChatPage() {
                             : "text-gray-400"
                         }`}
                       >
-                        {formatTime(msg.sent_at ?? msg.created_at)}
+                        {formatTime(msg.created_at)}
                       </p>
                     </div>
                   </div>
