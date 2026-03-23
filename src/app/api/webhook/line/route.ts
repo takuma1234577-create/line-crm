@@ -190,14 +190,63 @@ async function handleMessage(event: any, channelId: string) {
   // Only run auto-response matching for text messages
   if (message?.type !== 'text' || !messageText) return
 
-  await matchAutoResponse(channelId, messageText, event.replyToken)
+  // 1. Try keyword-based auto-response first
+  const autoResponseMatched = await matchAutoResponse(channelId, messageText, event.replyToken)
+  if (autoResponseMatched) return
+
+  // 2. If no auto-response matched, try AI auto-reply
+  const { shouldAutoReply, generateAutoReply } = await import('@/lib/ai/auto-reply')
+  const aiSettings = await shouldAutoReply(channelId)
+
+  if (aiSettings) {
+    try {
+      // Get friend display name
+      const { data: friendData } = await supabase
+        .from('friends')
+        .select('display_name')
+        .eq('id', friend.id)
+        .single()
+
+      const result = await generateAutoReply(
+        channelId,
+        friend.id,
+        friendData?.display_name ?? 'お客様',
+        messageText,
+        aiSettings
+      )
+
+      if (!result.wasEscalated && result.reply) {
+        // Apply reply delay if configured
+        if (aiSettings.reply_delay_seconds > 0) {
+          await new Promise(resolve => setTimeout(resolve, aiSettings.reply_delay_seconds * 1000))
+        }
+
+        // Send the AI reply via LINE
+        await lineClient.pushMessage({
+          to: lineUserId,
+          messages: [{ type: 'text', text: result.reply }],
+        })
+
+        // Store outbound message
+        await supabase.from('chat_messages').insert({
+          channel_id: channelId,
+          friend_id: friend.id,
+          direction: 'outbound',
+          message_type: 'text',
+          content: { text: result.reply },
+        })
+      }
+    } catch (err) {
+      console.error('[handleMessage] AI auto-reply error:', err)
+    }
+  }
 }
 
 async function matchAutoResponse(
   channelId: string,
   messageText: string,
   replyToken: string
-) {
+): Promise<boolean> {
   const { data: autoResponses } = await supabase
     .from('auto_responses')
     .select('*')
@@ -205,7 +254,7 @@ async function matchAutoResponse(
     .eq('is_active', true)
     .order('priority', { ascending: true })
 
-  if (!autoResponses || autoResponses.length === 0) return
+  if (!autoResponses || autoResponses.length === 0) return false
 
   for (const rule of autoResponses) {
     const keywords: string[] = rule.keywords ?? []
@@ -252,9 +301,11 @@ async function matchAutoResponse(
         console.error('[matchAutoResponse] reply failed:', err)
       }
       // Stop after the first match
-      return
+      return true
     }
   }
+
+  return false
 }
 
 async function handlePostback(event: any, channelId: string) {

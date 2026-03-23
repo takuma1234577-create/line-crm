@@ -47,7 +47,13 @@ const navGroups = [
   },
   {
     label: "AI",
-    items: [{ href: "/ai", label: "AIアシスタント", icon: "✨" }],
+    items: [
+      { href: "/ai", label: "AIアシスタント", icon: "✨" },
+      { href: "/ai/settings", label: "AI自動返信設定", icon: "🤖" },
+      { href: "/knowledge", label: "ナレッジベース", icon: "📚" },
+      { href: "/knowledge/templates", label: "テンプレート", icon: "📦" },
+      { href: "/ai/logs", label: "AI返信ログ", icon: "📋" },
+    ],
   },
   {
     label: "設定",
