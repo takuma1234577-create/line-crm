@@ -22,7 +22,11 @@ function verifySignature(body: string, signature: string): boolean {
     .createHmac('SHA256', channelSecret)
     .update(body)
     .digest('base64')
-  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature))
+  // Compare as strings since timingSafeEqual requires equal-length buffers
+  const hashBuf = Buffer.from(hash)
+  const sigBuf = Buffer.from(signature)
+  if (hashBuf.length !== sigBuf.length) return false
+  return crypto.timingSafeEqual(hashBuf, sigBuf)
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +112,7 @@ async function handleFollow(event: any, channelId: string) {
       }))
 
       const { error } = await supabase
-        .from('sequence_enrollments')
+        .from('step_enrollments')
         .upsert(enrollments, { onConflict: 'sequence_id,friend_id' })
 
       if (error) {
@@ -164,9 +168,9 @@ async function handleMessage(event: any, channelId: string) {
     friend_id: friend.id,
     direction: 'inbound',
     message_type: message?.type ?? 'text',
-    content: messageText,
+    content: { text: messageText },
     line_message_id: message?.id ?? null,
-    sent_at: new Date(event.timestamp).toISOString(),
+    created_at: new Date(event.timestamp).toISOString(),
   })
 
   if (insertError) {
@@ -194,30 +198,33 @@ async function matchAutoResponse(
   if (!autoResponses || autoResponses.length === 0) return
 
   for (const rule of autoResponses) {
-    const keyword: string = rule.keyword ?? ''
+    const keywords: string[] = rule.keywords ?? []
     const matchType: string = rule.match_type ?? 'exact'
     let matched = false
 
-    switch (matchType) {
-      case 'exact':
-        matched = messageText === keyword
-        break
-      case 'contains':
-        matched = messageText.includes(keyword)
-        break
-      case 'starts_with':
-        matched = messageText.startsWith(keyword)
-        break
-      case 'regex':
-        try {
-          const re = new RegExp(keyword)
-          matched = re.test(messageText)
-        } catch {
-          console.warn('[matchAutoResponse] invalid regex:', keyword)
-        }
-        break
-      default:
-        break
+    for (const keyword of keywords) {
+      switch (matchType) {
+        case 'exact':
+          matched = messageText === keyword
+          break
+        case 'contains':
+          matched = messageText.includes(keyword)
+          break
+        case 'starts_with':
+          matched = messageText.startsWith(keyword)
+          break
+        case 'regex':
+          try {
+            const re = new RegExp(keyword)
+            matched = re.test(messageText)
+          } catch {
+            console.warn('[matchAutoResponse] invalid regex:', keyword)
+          }
+          break
+        default:
+          break
+      }
+      if (matched) break
     }
 
     if (matched) {
@@ -264,8 +271,8 @@ async function handlePostback(event: any, channelId: string) {
     friend_id: friend?.id ?? null,
     direction: 'inbound',
     message_type: 'postback',
-    content: postbackData,
-    sent_at: new Date(event.timestamp).toISOString(),
+    content: { data: postbackData },
+    created_at: new Date(event.timestamp).toISOString(),
   })
 
   // Handle specific postback actions
@@ -283,8 +290,7 @@ async function handlePostback(event: any, channelId: string) {
         await supabase.from('form_submissions').insert({
           form_id: formId,
           friend_id: friend.id,
-          data: fieldEntries,
-          submitted_at: new Date().toISOString(),
+          answers: fieldEntries,
         })
       }
       break
