@@ -93,10 +93,10 @@ export async function POST(request: Request) {
     // Insert broadcast record
     const { error: insertError } = await supabase.from('broadcasts').insert({
       channel_id: CHANNEL_ID,
-      message,
+      messages: [{ type: 'text', text: message }],
       status: 'sent',
-      target_tag_id: tagId ?? null,
-      sent_count: sentCount,
+      total_recipients: friendLineUserIds.length,
+      success_count: sentCount,
       sent_at: new Date().toISOString(),
     })
 

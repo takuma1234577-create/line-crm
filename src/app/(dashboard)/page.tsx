@@ -70,9 +70,9 @@ export default function DashboardPage() {
           // Recent messages for activity feed
           supabase
             .from("chat_messages")
-            .select("id, direction, content, sent_at, friend_id, friends(display_name)")
+            .select("id, direction, content, created_at, friend_id, friends(display_name)")
             .eq("channel_id", CHANNEL_ID)
-            .order("sent_at", { ascending: false })
+            .order("created_at", { ascending: false })
             .limit(6),
         ]);
 
@@ -95,7 +95,7 @@ export default function DashboardPage() {
             detail: isInbound
               ? `${friendName}さんからメッセージを受信しました`
               : `${friendName}さんにメッセージを送信しました`,
-            time: timeAgo(msg.sent_at ?? msg.created_at),
+            time: timeAgo(msg.created_at),
           };
         }
       );

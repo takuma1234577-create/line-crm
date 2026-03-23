@@ -58,8 +58,7 @@ export async function POST(request: Request) {
       friend_id: friend.id,
       direction: 'outbound',
       message_type: 'text',
-      content: message,
-      sent_at: new Date().toISOString(),
+      content: { text: message },
     })
 
     if (insertError) {

@@ -9,13 +9,13 @@ type BroadcastStatus = "draft" | "scheduled" | "sent" | "sending";
 
 interface Broadcast {
   id: string;
-  message: string;
+  messages: { type: string; text?: string }[];
   status: BroadcastStatus;
-  target_tag_id: string | null;
+  segment_id: string | null;
   sent_at: string | null;
-  sent_count: number | null;
+  total_recipients: number;
+  success_count: number;
   created_at: string;
-  tags?: { name: string } | null;
 }
 
 interface Tag {
@@ -44,7 +44,7 @@ export default function BroadcastsPage() {
     setLoading(true);
     const { data, error } = await supabase
       .from("broadcasts")
-      .select("*, tags(name)")
+      .select("*")
       .eq("channel_id", CHANNEL_ID)
       .order("created_at", { ascending: false });
 
@@ -219,7 +219,7 @@ export default function BroadcastsPage() {
                       className="hover:bg-gray-50 transition-colors cursor-pointer"
                     >
                       <td className="px-6 py-4 font-medium text-gray-900 max-w-xs truncate">
-                        {broadcast.message}
+                        {broadcast.messages?.[0]?.text ?? "(メッセージ)"}
                       </td>
                       <td className="px-6 py-4">
                         <span
@@ -229,8 +229,8 @@ export default function BroadcastsPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-500">
-                        {broadcast.tags?.name
-                          ? `${broadcast.tags.name}タグ`
+                        {broadcast.segment_id
+                          ? "セグメント指定"
                           : "全ての友だち"}
                       </td>
                       <td className="px-6 py-4 text-gray-500">
@@ -239,8 +239,8 @@ export default function BroadcastsPage() {
                           : "-"}
                       </td>
                       <td className="px-6 py-4 text-gray-500">
-                        {broadcast.sent_count !== null
-                          ? `${broadcast.sent_count}通`
+                        {broadcast.success_count > 0
+                          ? `${broadcast.success_count}通`
                           : "-"}
                       </td>
                     </tr>
