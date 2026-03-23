@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     const MAX_ITERATIONS = 10
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 4096,
         system: systemPrompt,
         tools: crmTools as any,
