@@ -429,6 +429,19 @@ export const crmTools: any[] = [
     }
   },
 
+  // ===== 友だちCSVインポート =====
+  {
+    name: "import_friends_from_csv",
+    description: "アップロードされたLメッセージCSVデータから友だち情報（LINE ID、名前、タグ、追加日、個人情報）をDBに一括インポートする。CSVがアップロードされた会話でのみ使用可能。",
+    input_schema: {
+      type: "object",
+      properties: {
+        confirm: { type: "boolean", description: "インポート実行の確認。trueで実行。" }
+      },
+      required: ["confirm"]
+    }
+  },
+
   // ===== Shopify商品・ページ取得 =====
   {
     name: "ec_get_products",

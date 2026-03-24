@@ -265,6 +265,10 @@ export async function POST(request: Request) {
       history = await loadConversation(supabase, conversationId)
     }
 
+    // Extract raw CSV base64 for potential import tool use
+    const csvAttachment = attachments?.find((a) => isCSV(a))
+    const csvBase64 = csvAttachment?.base64 ?? null
+
     // Build content blocks with attachments
     const hasAttachments = attachments && attachments.length > 0
     const userContent = hasAttachments
@@ -310,7 +314,7 @@ export async function POST(request: Request) {
         const toolResults: any[] = []
         for (const toolUse of toolUseBlocks) {
           const tu = toolUse as any
-          const result = await executeToolCall(tu.name, tu.input, channelId)
+          const result = await executeToolCall(tu.name, tu.input, channelId, csvBase64)
           toolResults.push({
             type: 'tool_result',
             tool_use_id: tu.id,

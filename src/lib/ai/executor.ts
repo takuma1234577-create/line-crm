@@ -20,12 +20,15 @@ const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 export async function executeToolCall(
   toolName: string,
   toolInput: any,
-  channelId: string
+  channelId: string,
+  csvBase64?: string | null
 ): Promise<string> {
   const cid = channelId || CHANNEL_ID
 
   try {
     switch (toolName) {
+      case 'import_friends_from_csv':
+        return await importFriendsFromCSV(cid, toolInput, csvBase64)
       case 'get_todays_messages':
         return await getTodaysMessages(cid, toolInput)
       case 'get_conversation':
@@ -2358,4 +2361,234 @@ async function ecGetStorePages(channelId: string, input: any): Promise<string> {
   }
 
   return result
+}
+
+// ---------------------------------------------------------------------------
+// CSV Import (Lメッセージ友だちデータ)
+// ---------------------------------------------------------------------------
+
+function parseCSVLineExec(line: string): string[] {
+  const fields: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(current)
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  fields.push(current)
+  return fields
+}
+
+function tagColor(name: string): string {
+  const colors = [
+    '#EF4444', '#F97316', '#F59E0B', '#84CC16', '#22C55E',
+    '#14B8A6', '#06B6D4', '#3B82F6', '#6366F1', '#8B5CF6',
+    '#A855F7', '#D946EF', '#EC4899', '#F43F5E',
+  ]
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return colors[Math.abs(hash) % colors.length]
+}
+
+async function importFriendsFromCSV(
+  channelId: string,
+  input: any,
+  csvBase64?: string | null
+): Promise<string> {
+  if (!input.confirm) {
+    return 'インポートを実行するには confirm: true を指定してください。'
+  }
+
+  if (!csvBase64) {
+    return 'CSVファイルが見つかりません。CSVファイルをアップロードしてから再度お試しください。'
+  }
+
+  // Decode CSV
+  const buffer = Buffer.from(csvBase64, 'base64')
+  let text: string
+  const utf8Text = buffer.toString('utf-8')
+  if (utf8Text.includes('\ufffd')) {
+    try {
+      const iconv = require('iconv-lite')
+      text = iconv.decode(buffer, 'Shift_JIS')
+    } catch {
+      text = utf8Text
+    }
+  } else {
+    text = utf8Text
+  }
+
+  const lines = text.split('\n').filter((l) => l.trim())
+  if (lines.length < 3) {
+    return 'CSVのデータ行が少なすぎます。'
+  }
+
+  const headerRow = parseCSVLineExec(lines[1])
+
+  // Find tag columns
+  const tagColumns: { index: number; name: string }[] = []
+  for (let i = 0; i < headerRow.length; i++) {
+    const h = headerRow[i].trim()
+    if (h.startsWith('タグ_')) {
+      tagColumns.push({ index: i, name: h.replace('タグ_', '') })
+    }
+  }
+
+  // Find key column indices
+  const colIndex = (label: string) =>
+    headerRow.findIndex((h) => h.trim() === label)
+
+  const idxUserId = colIndex('ユーザーID')
+  const idxName = 1
+  const idxFollowedAt = colIndex('友だち追加日')
+  const idxSystemName = colIndex('システム表示名')
+  const idxPhone = colIndex('携帯電話')
+  const idxEmail = colIndex('メールアドレス')
+  const idxBirthday = colIndex('生年月日')
+  const idxPostalCode = colIndex('郵便番号')
+  const idxPrefecture = colIndex('都道府県')
+  const idxCity = colIndex('市区町村名')
+  const idxAddress = colIndex('町名/番地')
+  const idxBuilding = colIndex('建物名・部屋番号')
+  const idxMemo = colIndex('個別メモ')
+
+  const dataRows = lines.slice(2)
+
+  // Step 1: Ensure tags exist
+  const uniqueTagNames = tagColumns.map((t) => t.name)
+  const { data: existingTags } = await supabase
+    .from('tags')
+    .select('id, name')
+    .eq('channel_id', channelId)
+
+  const existingTagMap = new Map(
+    (existingTags ?? []).map((t: any) => [t.name, t.id])
+  )
+
+  const missingTags = uniqueTagNames.filter((n) => !existingTagMap.has(n))
+  if (missingTags.length > 0) {
+    const tagsToInsert = missingTags.map((name) => ({
+      channel_id: channelId,
+      name,
+      color: tagColor(name),
+    }))
+
+    for (let i = 0; i < tagsToInsert.length; i += 50) {
+      const batch = tagsToInsert.slice(i, i + 50)
+      const { data: inserted } = await supabase
+        .from('tags')
+        .upsert(batch, { onConflict: 'channel_id,name' })
+        .select('id, name')
+
+      if (inserted) {
+        for (const t of inserted) {
+          existingTagMap.set(t.name, t.id)
+        }
+      }
+    }
+  }
+
+  // Step 2: Import friends
+  let imported = 0
+  let skipped = 0
+  let tagLinks = 0
+
+  for (const line of dataRows) {
+    const cols = parseCSVLineExec(line)
+    const lineUserId = cols[idxUserId]?.trim()
+    if (!lineUserId || !lineUserId.startsWith('U')) {
+      skipped++
+      continue
+    }
+
+    const displayName = cols[idxName]?.trim() || 'Unknown'
+    const followedAt = cols[idxFollowedAt]?.trim() || null
+
+    const customFields: Record<string, string> = {}
+    const addField = (key: string, idx: number) => {
+      const val = idx >= 0 ? cols[idx]?.trim() : ''
+      if (val) customFields[key] = val
+    }
+    addField('system_name', idxSystemName)
+    addField('phone', idxPhone)
+    addField('email', idxEmail)
+    addField('birthday', idxBirthday)
+    addField('postal_code', idxPostalCode)
+    addField('prefecture', idxPrefecture)
+    addField('city', idxCity)
+    addField('address', idxAddress)
+    addField('building', idxBuilding)
+    addField('memo', idxMemo)
+
+    const { data: friend, error: friendError } = await supabase
+      .from('friends')
+      .upsert(
+        {
+          channel_id: channelId,
+          line_user_id: lineUserId,
+          display_name: displayName,
+          status: 'active',
+          followed_at: followedAt
+            ? new Date(followedAt).toISOString()
+            : new Date().toISOString(),
+          custom_fields:
+            Object.keys(customFields).length > 0 ? customFields : null,
+        },
+        { onConflict: 'channel_id,line_user_id' }
+      )
+      .select('id')
+      .single()
+
+    if (friendError) {
+      skipped++
+      continue
+    }
+
+    imported++
+
+    // Assign tags
+    const friendTagInserts: { friend_id: string; tag_id: string }[] = []
+    for (const tc of tagColumns) {
+      const val = cols[tc.index]?.trim()
+      if (val === '1') {
+        const tagId = existingTagMap.get(tc.name)
+        if (tagId) {
+          friendTagInserts.push({ friend_id: friend.id, tag_id: tagId })
+        }
+      }
+    }
+
+    if (friendTagInserts.length > 0) {
+      const { error: tagError } = await supabase
+        .from('friend_tags')
+        .upsert(friendTagInserts, { onConflict: 'friend_id,tag_id' })
+
+      if (!tagError) {
+        tagLinks += friendTagInserts.length
+      }
+    }
+  }
+
+  return `### CSVインポート完了
+
+- **インポート済み**: ${imported}人
+- **スキップ**: ${skipped}件
+- **タグ作成**: ${missingTags.length}個
+- **タグ紐付け**: ${tagLinks}件
+
+友だち一覧ページで確認できます。`
 }

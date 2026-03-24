@@ -81,6 +81,11 @@ export function getSystemPrompt(channelInfo: { display_name?: string; friend_cou
 - ユーザーがアップロードした画像やPDFを認識・分析できる
 - スクリーンショット、デザイン画像、レポートPDFなどを読み取って対応
 
+## CSVインポート
+- LメッセージのCSVがアップロードされた場合、import_friends_from_csvツールでDBに一括インポートできる
+- 「友だちを取り込んで」「インポートして」「全員登録して」等の指示があれば、import_friends_from_csv(confirm: true)を実行
+- インポートすると友だち情報、タグ、個人情報（電話、メール、住所等）がすべてDBに保存される
+
 # リッチメニュー画像認識（重要）
 ユーザーがリッチメニューのデザイン画像をアップロードした場合、以下の手順で自動処理する：
 
