@@ -4,10 +4,27 @@ import { useState, useRef, useEffect, useCallback } from "react";
 
 const CHANNEL_ID = "00000000-0000-0000-0000-000000000010";
 
+// Claude API file limits
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+const ACCEPTED_PDF_TYPES = ["application/pdf"];
+const ACCEPTED_TYPES = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES];
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_PDF_SIZE = 32 * 1024 * 1024; // 32MB
+
+interface FileAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  base64: string;
+  previewUrl?: string;
+}
+
 interface ChatMessage {
   id: string;
   role: "system" | "user" | "assistant";
   content: string;
+  attachments?: FileAttachment[];
 }
 
 interface ConversationItem {
@@ -153,8 +170,62 @@ export default function AIPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+
+    for (const file of files) {
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        alert(`非対応のファイル形式です: ${file.name}\n対応形式: JPEG, PNG, GIF, WebP, PDF`);
+        continue;
+      }
+
+      const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
+      const maxSize = isImage ? MAX_IMAGE_SIZE : MAX_PDF_SIZE;
+      const maxLabel = isImage ? "5MB" : "32MB";
+
+      if (file.size > maxSize) {
+        alert(`ファイルサイズが上限を超えています: ${file.name}\n上限: ${maxLabel}`);
+        continue;
+      }
+
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1]);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
+
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: `file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          base64,
+          previewUrl,
+        },
+      ]);
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => {
+      const att = prev.find((a) => a.id === id);
+      if (att?.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -169,16 +240,20 @@ export default function AIPage() {
 
   const handleSend = useCallback(async (messageOverride?: string) => {
     const messageText = (messageOverride ?? input).trim();
-    if (!messageText || isLoading) return;
+    if ((!messageText && attachments.length === 0) || isLoading) return;
+
+    const currentAttachments = [...attachments];
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: messageText,
+      content: messageText || (currentAttachments.length > 0 ? `${currentAttachments.length}個のファイルを送信` : ""),
+      attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
     };
 
     setMessages((prev) => [...prev, userMessage]);
     if (!messageOverride) setInput("");
+    setAttachments([]);
     setIsLoading(true);
 
     try {
@@ -189,6 +264,11 @@ export default function AIPage() {
           message: messageText,
           conversationId: conversationId ?? undefined,
           channelId: CHANNEL_ID,
+          attachments: currentAttachments.map((a) => ({
+            type: a.type,
+            name: a.name,
+            base64: a.base64,
+          })),
         }),
       });
 
@@ -277,7 +357,7 @@ export default function AIPage() {
     }
 
     setIsLoading(false);
-  }, [input, isLoading, conversationId]);
+  }, [input, isLoading, conversationId, attachments]);
 
   const handleQuickAction = (message: string) => {
     setInput("");
@@ -405,8 +485,35 @@ export default function AIPage() {
                           : "bg-white text-gray-800 shadow-sm border border-gray-100"
                       }`}
                     >
+                      {/* Attachment previews */}
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div className="mb-2 flex flex-wrap gap-2">
+                          {msg.attachments.map((att) =>
+                            att.previewUrl ? (
+                              <img
+                                key={att.id}
+                                src={att.previewUrl}
+                                alt={att.name}
+                                className="max-h-48 max-w-full rounded-lg object-contain"
+                              />
+                            ) : (
+                              <div
+                                key={att.id}
+                                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
+                                  isUser ? "bg-white/20" : "bg-gray-100"
+                                }`}
+                              >
+                                <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                </svg>
+                                <span className="truncate max-w-[120px]">{att.name}</span>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
                       {isUser ? (
-                        <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                        msg.content ? <p className="whitespace-pre-wrap text-sm">{msg.content}</p> : null
                       ) : msg.content ? (
                         <div className="space-y-1">{renderFormattedText(msg.content)}</div>
                       ) : null}
@@ -461,13 +568,71 @@ export default function AIPage() {
         {/* Input Area */}
         <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-4">
           <div className="mx-auto max-w-3xl">
+            {/* Attachment previews */}
+            {attachments.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="group relative flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                  >
+                    {att.previewUrl ? (
+                      <img src={att.previewUrl} alt={att.name} className="h-10 w-10 rounded object-cover" />
+                    ) : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded bg-red-50">
+                        <svg className="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium text-gray-700 max-w-[120px]">{att.name}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {att.size < 1024 * 1024
+                          ? `${(att.size / 1024).toFixed(0)}KB`
+                          : `${(att.size / (1024 * 1024)).toFixed(1)}MB`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => removeAttachment(att.id)}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-600 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-end gap-3">
+              {/* File upload button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-500 transition-all hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                title="ファイルを添付（画像: 5MB以下, PDF: 32MB以下）"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                </svg>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPTED_TYPES.join(",")}
+                multiple
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+
               <div className="relative flex-1">
                 <textarea
                   ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="AIに指示を入力... 例: 今日のメッセージをまとめて返信して"
+                  placeholder="AIに指示を入力... 画像やPDFも添付できます"
                   rows={1}
                   className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 pr-12 text-sm leading-relaxed placeholder:text-gray-400 focus:border-[#06C755] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
                   onKeyDown={(e) => {
@@ -485,7 +650,7 @@ export default function AIPage() {
               </div>
               <button
                 onClick={() => handleSend()}
-                disabled={isLoading || !input.trim()}
+                disabled={isLoading || (!input.trim() && attachments.length === 0)}
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#06C755] text-white shadow-sm transition-all hover:bg-[#05A649] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
