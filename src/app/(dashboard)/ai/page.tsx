@@ -7,9 +7,11 @@ const CHANNEL_ID = "00000000-0000-0000-0000-000000000010";
 // Claude API file limits
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 const ACCEPTED_PDF_TYPES = ["application/pdf"];
-const ACCEPTED_TYPES = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES];
+const ACCEPTED_CSV_TYPES = ["text/csv", "application/vnd.ms-excel"];
+const ACCEPTED_TYPES = [...ACCEPTED_IMAGE_TYPES, ...ACCEPTED_PDF_TYPES, ...ACCEPTED_CSV_TYPES];
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_PDF_SIZE = 32 * 1024 * 1024; // 32MB
+const MAX_CSV_SIZE = 10 * 1024 * 1024; // 10MB
 
 interface FileAttachment {
   id: string;
@@ -221,14 +223,16 @@ export default function AIPage() {
 
   const processFiles = async (files: File[]) => {
     for (const file of files) {
-      if (!ACCEPTED_TYPES.includes(file.type)) {
-        alert(`非対応のファイル形式です: ${file.name}\n対応形式: JPEG, PNG, GIF, WebP, PDF`);
+      const isCSVByExt = file.name.toLowerCase().endsWith(".csv");
+      if (!ACCEPTED_TYPES.includes(file.type) && !isCSVByExt) {
+        alert(`非対応のファイル形式です: ${file.name}\n対応形式: JPEG, PNG, GIF, WebP, PDF, CSV`);
         continue;
       }
 
       const isImage = ACCEPTED_IMAGE_TYPES.includes(file.type);
-      const maxSize = isImage ? MAX_IMAGE_SIZE : MAX_PDF_SIZE;
-      const maxLabel = isImage ? "5MB" : "32MB";
+      const isCSV = ACCEPTED_CSV_TYPES.includes(file.type) || isCSVByExt;
+      const maxSize = isImage ? MAX_IMAGE_SIZE : isCSV ? MAX_CSV_SIZE : MAX_PDF_SIZE;
+      const maxLabel = isImage ? "5MB" : isCSV ? "10MB" : "32MB";
 
       if (file.size > maxSize) {
         alert(`ファイルサイズが上限を超えています: ${file.name}\n上限: ${maxLabel}`);
@@ -431,7 +435,7 @@ export default function AIPage() {
               </svg>
             </div>
             <p className="text-lg font-semibold text-gray-900">ファイルをドロップ</p>
-            <p className="text-sm text-gray-500">画像（5MB以下）・PDF（32MB以下）</p>
+            <p className="text-sm text-gray-500">画像（5MB以下）・PDF（32MB以下）・CSV（10MB以下）</p>
           </div>
         </div>
       )}
@@ -674,7 +678,7 @@ export default function AIPage() {
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading}
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-500 transition-all hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
-                title="ファイルを添付（画像: 5MB以下, PDF: 32MB以下）"
+                title="ファイルを添付（画像: 5MB以下, PDF: 32MB以下, CSV: 10MB以下）"
               >
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
@@ -683,7 +687,7 @@ export default function AIPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={ACCEPTED_TYPES.join(",")}
+                accept={[...ACCEPTED_TYPES, ".csv"].join(",")}
                 multiple
                 className="hidden"
                 onChange={handleFileSelect}

@@ -78,6 +78,27 @@ interface Attachment {
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const PDF_TYPES = ['application/pdf']
+const CSV_TYPES = ['text/csv', 'application/vnd.ms-excel']
+
+function isCSV(att: Attachment): boolean {
+  return CSV_TYPES.includes(att.type) || att.name.toLowerCase().endsWith('.csv')
+}
+
+function decodeCSVBase64(base64: string): string {
+  const buffer = Buffer.from(base64, 'base64')
+  // Try UTF-8 first, fallback to Shift_JIS
+  const text = buffer.toString('utf-8')
+  if (text.includes('\ufffd')) {
+    // Likely Shift_JIS, use iconv-lite
+    try {
+      const iconv = require('iconv-lite')
+      return iconv.decode(buffer, 'Shift_JIS')
+    } catch {
+      return text
+    }
+  }
+  return text
+}
 
 function buildContentBlocks(
   message: string,
@@ -104,6 +125,17 @@ function buildContentBlocks(
             media_type: 'application/pdf',
             data: att.base64,
           },
+        })
+      } else if (isCSV(att)) {
+        // Decode CSV and include as text (Claude can't process CSV as binary)
+        const csvText = decodeCSVBase64(att.base64)
+        // Truncate to ~50K chars to avoid token limits
+        const truncated = csvText.length > 50000
+          ? csvText.slice(0, 50000) + `\n\n... (${csvText.length - 50000}文字省略)`
+          : csvText
+        blocks.push({
+          type: 'text',
+          text: `[CSVファイル: ${att.name}]\n\`\`\`csv\n${truncated}\n\`\`\``,
         })
       }
     }
@@ -231,6 +263,14 @@ export async function POST(request: Request) {
               return {
                 type: 'text',
                 text: `[${block.type === 'image' ? '画像' : 'PDF'}ファイル添付]`,
+              }
+            }
+            // Strip large CSV text blocks
+            if (block.type === 'text' && block.text?.startsWith('[CSVファイル:')) {
+              const nameMatch = block.text.match(/\[CSVファイル: (.+?)\]/)
+              return {
+                type: 'text',
+                text: `[CSVファイル添付: ${nameMatch?.[1] ?? 'file.csv'}]`,
               }
             }
             return block
