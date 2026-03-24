@@ -100,6 +100,91 @@ function decodeCSVBase64(base64: string): string {
   return text
 }
 
+function parseCSVLine(line: string): string[] {
+  const fields: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(current)
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  fields.push(current)
+  return fields
+}
+
+/**
+ * Compact CSV by collapsing tag columns (0/1 flags) into a single "tags" column.
+ * This dramatically reduces the size for Lメッセージ exports which have 90+ tag columns.
+ */
+function compactCSV(csvText: string): string {
+  const lines = csvText.split('\n').filter((l) => l.trim())
+  if (lines.length < 3) return csvText
+
+  // Row 0: internal IDs, Row 1: human-readable headers, Row 2+: data
+  const headerRow1 = parseCSVLine(lines[0])
+  const headerRow2 = parseCSVLine(lines[1])
+
+  // Detect tag columns (header starts with タグ_)
+  const tagIndices: number[] = []
+  const tagNames: string[] = []
+  const nonTagIndices: number[] = []
+
+  for (let i = 0; i < headerRow2.length; i++) {
+    const h = headerRow2[i].trim()
+    if (h.startsWith('タグ_')) {
+      tagIndices.push(i)
+      tagNames.push(h.replace('タグ_', ''))
+    } else {
+      nonTagIndices.push(i)
+    }
+  }
+
+  // If no tag columns detected, return as-is (with size limit)
+  if (tagIndices.length === 0) {
+    return csvText
+  }
+
+  // Build compacted header
+  const compactHeaders = nonTagIndices.map((i) => headerRow2[i]?.trim() || '')
+  compactHeaders.push('タグ一覧')
+
+  // Build compacted rows
+  const compactRows: string[] = [compactHeaders.join(',')]
+
+  for (let r = 2; r < lines.length; r++) {
+    const cols = parseCSVLine(lines[r])
+    const nonTagValues = nonTagIndices.map((i) => {
+      const v = cols[i] ?? ''
+      return v.includes(',') ? `"${v}"` : v
+    })
+
+    // Collect active tags
+    const activeTags: string[] = []
+    for (let t = 0; t < tagIndices.length; t++) {
+      if (cols[tagIndices[t]]?.trim() === '1') {
+        activeTags.push(tagNames[t])
+      }
+    }
+
+    nonTagValues.push(activeTags.length > 0 ? `"${activeTags.join(', ')}"` : '')
+    compactRows.push(nonTagValues.join(','))
+  }
+
+  return compactRows.join('\n')
+}
+
 function buildContentBlocks(
   message: string,
   attachments?: Attachment[]
@@ -127,15 +212,20 @@ function buildContentBlocks(
           },
         })
       } else if (isCSV(att)) {
-        // Decode CSV and include as text (Claude can't process CSV as binary)
-        const csvText = decodeCSVBase64(att.base64)
-        // Truncate to ~50K chars to avoid token limits
-        const truncated = csvText.length > 50000
-          ? csvText.slice(0, 50000) + `\n\n... (${csvText.length - 50000}文字省略)`
-          : csvText
+        // Decode CSV and compact tag columns
+        const rawCSV = decodeCSVBase64(att.base64)
+        const compacted = compactCSV(rawCSV)
+        const totalRows = rawCSV.split('\n').filter((l) => l.trim()).length - 2 // minus 2 header rows
+
+        // Truncate if still too large (200K chars ~ fits in context)
+        const maxChars = 200000
+        const truncated = compacted.length > maxChars
+          ? compacted.slice(0, maxChars) + `\n\n... (残り${totalRows - compacted.slice(0, maxChars).split('\n').length}行省略)`
+          : compacted
+
         blocks.push({
           type: 'text',
-          text: `[CSVファイル: ${att.name}]\n\`\`\`csv\n${truncated}\n\`\`\``,
+          text: `[CSVファイル: ${att.name} / 全${totalRows}行]\n\`\`\`csv\n${truncated}\n\`\`\``,
         })
       }
     }
