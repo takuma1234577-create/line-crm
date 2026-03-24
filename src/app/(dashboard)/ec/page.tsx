@@ -39,6 +39,37 @@ interface LinkStats {
   unlinked: number;
 }
 
+const statusConfig: Record<string, { label: string; className: string }> = {
+  pending: { label: "保留中", className: "bg-gray-100 text-gray-700" },
+  confirmed: { label: "確認済", className: "bg-blue-50 text-blue-700" },
+  shipped: { label: "発送済", className: "bg-yellow-50 text-yellow-700" },
+  delivered: { label: "配達済", className: "bg-[#06C755]/10 text-[#06C755]" },
+  cancelled: { label: "キャンセル", className: "bg-red-50 text-red-600" },
+  returned: { label: "返品", className: "bg-red-50 text-red-600" },
+};
+
+function PlatformIcon({ platform }: { platform: string }) {
+  if (platform === "shopify") {
+    return (
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#96BF48] text-white text-xs font-bold">
+        S
+      </span>
+    );
+  }
+  if (platform === "amazon") {
+    return (
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#FF9900] text-white text-xs font-bold">
+        A
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-400 text-white text-xs font-bold">
+      ?
+    </span>
+  );
+}
+
 export default function ECDashboardPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -122,342 +153,376 @@ export default function ECDashboardPage() {
     fetchData();
   }
 
-  function statusBadge(status: string) {
-    const map: Record<string, { label: string; color: string }> = {
-      pending: { label: "保留中", color: "bg-gray-100 text-gray-700" },
-      confirmed: { label: "確認済", color: "bg-blue-100 text-blue-700" },
-      shipped: { label: "発送済", color: "bg-yellow-100 text-yellow-700" },
-      delivered: { label: "配達済", color: "bg-green-100 text-green-700" },
-      cancelled: { label: "キャンセル", color: "bg-red-100 text-red-700" },
-      returned: { label: "返品", color: "bg-red-100 text-red-700" },
-    };
-    const s = map[status] ?? { label: status, color: "bg-gray-100 text-gray-700" };
-    return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${s.color}`}>{s.label}</span>;
-  }
+  const linkRate = linkStats.linked + linkStats.unlinked > 0
+    ? Math.round((linkStats.linked / (linkStats.linked + linkStats.unlinked)) * 100)
+    : 0;
 
-  function platformIcon(platform: string) {
-    if (platform === "shopify") {
-      return (
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-[#96BF48] text-white text-xs font-bold">S</span>
-      );
-    }
-    if (platform === "amazon") {
-      return (
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-[#FF9900] text-white text-xs font-bold">A</span>
-      );
-    }
-    return (
-      <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-gray-400 text-white text-xs font-bold">?</span>
-    );
-  }
-
+  // Loading skeleton
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#06C755] border-t-transparent" />
+      <div className="space-y-6">
+        {/* Stats skeleton */}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-xl border border-gray-200 bg-white p-5">
+              <div className="h-4 w-20 animate-pulse rounded bg-gray-200" />
+              <div className="mt-2 h-8 w-16 animate-pulse rounded bg-gray-200" />
+            </div>
+          ))}
+        </div>
+
+        {/* Content skeleton */}
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-6">
+            <div className="h-6 w-32 animate-pulse rounded bg-gray-200" />
+            <div className="mt-4 space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg bg-gray-100" />
+              ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <div className="h-6 w-24 animate-pulse rounded bg-gray-200" />
+            <div className="mt-4 h-40 animate-pulse rounded-lg bg-gray-100" />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">EC連携</h1>
-          <p className="mt-1 text-sm text-gray-500">ECストアの注文をLINE友だちと紐付けて管理</p>
-        </div>
-        <div className="flex gap-2">
-          <Link
-            href="/ec/orders"
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            注文一覧
-          </Link>
-          <Link
-            href="/ec/products"
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            商品管理
-          </Link>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs font-medium text-gray-500">総注文数</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900">{linkStats.linked + linkStats.unlinked}</p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs font-medium text-gray-500">LINE紐付け済</p>
-          <p className="mt-1 text-2xl font-bold text-[#06C755]">{linkStats.linked}</p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs font-medium text-gray-500">未紐付け</p>
-          <p className="mt-1 text-2xl font-bold text-orange-500">{linkStats.unlinked}</p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4">
-          <p className="text-xs font-medium text-gray-500">連携ストア数</p>
-          <p className="mt-1 text-2xl font-bold text-gray-900">{stores.length}</p>
-        </div>
-      </div>
-
-      {/* Store Connections */}
-      <div className="rounded-xl border border-gray-200 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-gray-900">ストア連携</h2>
-          <button
-            onClick={() => setShowAddStore(true)}
-            className="rounded-lg bg-[#06C755] px-4 py-2 text-sm font-medium text-white hover:bg-[#05b34c] transition-colors"
-          >
-            + ストア追加
-          </button>
-        </div>
-
-        {showAddStore && (
-          <div className="border-b border-gray-100 bg-gray-50 px-6 py-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-700">プラットフォーム</label>
-                <select
-                  value={newStore.platform}
-                  onChange={(e) => setNewStore({ ...newStore, platform: e.target.value })}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#06C755] focus:outline-none focus:ring-1 focus:ring-[#06C755]"
-                >
-                  <option value="shopify">Shopify</option>
-                  <option value="amazon">Amazon</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-700">ストア名</label>
-                <input
-                  type="text"
-                  value={newStore.store_name}
-                  onChange={(e) => setNewStore({ ...newStore, store_name: e.target.value })}
-                  placeholder="マイショップ"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#06C755] focus:outline-none focus:ring-1 focus:ring-[#06C755]"
-                />
-              </div>
-              {newStore.platform === "shopify" && (
-                <>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-700">Shopifyドメイン</label>
-                    <input
-                      type="text"
-                      value={newStore.shopify_domain}
-                      onChange={(e) => setNewStore({ ...newStore, shopify_domain: e.target.value })}
-                      placeholder="myshop.myshopify.com"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#06C755] focus:outline-none focus:ring-1 focus:ring-[#06C755]"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-700">アクセストークン</label>
-                    <input
-                      type="password"
-                      value={newStore.shopify_access_token}
-                      onChange={(e) => setNewStore({ ...newStore, shopify_access_token: e.target.value })}
-                      placeholder="shpat_xxxxx"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#06C755] focus:outline-none focus:ring-1 focus:ring-[#06C755]"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={handleAddStore}
-                className="rounded-lg bg-[#06C755] px-4 py-2 text-sm font-medium text-white hover:bg-[#05b34c]"
-              >
-                追加
-              </button>
-              <button
-                onClick={() => setShowAddStore(false)}
-                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                キャンセル
-              </button>
-            </div>
-          </div>
-        )}
-
-        {stores.length === 0 ? (
-          <div className="px-6 py-12 text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
-              <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016A3.001 3.001 0 0021 9.349m-18 0V4.125C3 3.504 3.504 3 4.125 3h15.75c.621 0 1.125.504 1.125 1.125V9.35" />
+    <div className="space-y-6">
+      {/* KPI Stats */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg bg-indigo-50 p-2">
+              <svg className="h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
               </svg>
             </div>
-            <p className="text-sm text-gray-500">まだストアが連携されていません</p>
-            <button
-              onClick={() => setShowAddStore(true)}
-              className="mt-3 text-sm font-medium text-[#06C755] hover:underline"
-            >
-              ストアを追加する
-            </button>
+            <span className="text-xs font-medium text-gray-500">総注文数</span>
           </div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {stores.map((store) => (
-              <div key={store.id} className="flex items-center justify-between px-6 py-4">
-                <div className="flex items-center gap-3">
-                  {platformIcon(store.platform)}
+          <p className="mt-3 text-2xl font-bold text-gray-900">{(linkStats.linked + linkStats.unlinked).toLocaleString()}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg bg-[#06C755]/10 p-2">
+              <svg className="h-4 w-4 text-[#06C755]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+              </svg>
+            </div>
+            <span className="text-xs font-medium text-gray-500">LINE紐付け率</span>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#06C755]">{linkRate}%</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg bg-blue-50 p-2">
+              <svg className="h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <span className="text-xs font-medium text-gray-500">待機フォローアップ</span>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-gray-900">{followupStats.scheduled}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg bg-orange-50 p-2">
+              <svg className="h-4 w-4 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64" />
+              </svg>
+            </div>
+            <span className="text-xs font-medium text-gray-500">連携ストア数</span>
+          </div>
+          <p className="mt-3 text-2xl font-bold text-gray-900">{stores.length}</p>
+        </div>
+      </div>
+
+      {/* Main Grid */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Left Column - Store Connections + Orders */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Store Connections */}
+          <div className="rounded-xl border border-gray-200 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+              <h2 className="font-semibold text-gray-900">ストア連携</h2>
+              <button
+                onClick={() => setShowAddStore(true)}
+                className="flex items-center gap-1.5 rounded-lg bg-[#06C755] px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-[#05A649]"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                ストア追加
+              </button>
+            </div>
+
+            {showAddStore && (
+              <div className="border-b border-gray-100 bg-gray-50 p-6">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{store.store_name}</p>
-                    <p className="text-xs text-gray-500">
-                      {store.platform === "shopify" ? store.shopify_domain : store.platform.toUpperCase()}
-                      {store.last_synced_at && (
-                        <span className="ml-2">最終同期: {new Date(store.last_synced_at).toLocaleString("ja-JP")}</span>
-                      )}
-                    </p>
+                    <label className="mb-1.5 block text-xs font-medium text-gray-700">プラットフォーム</label>
+                    <select
+                      value={newStore.platform}
+                      onChange={(e) => setNewStore({ ...newStore, platform: e.target.value })}
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-[#06C755] focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
+                    >
+                      <option value="shopify">Shopify</option>
+                      <option value="amazon">Amazon</option>
+                    </select>
                   </div>
-                </div>
-                <button
-                  onClick={() => handleSync(store.id)}
-                  disabled={syncing === store.id}
-                  className="rounded-lg border border-[#06C755] px-3 py-1.5 text-xs font-medium text-[#06C755] hover:bg-[#06C755]/5 disabled:opacity-50 transition-colors"
-                >
-                  {syncing === store.id ? (
-                    <span className="flex items-center gap-1">
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#06C755] border-t-transparent" />
-                      同期中...
-                    </span>
-                  ) : (
-                    "同期"
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-gray-700">ストア名</label>
+                    <input
+                      type="text"
+                      value={newStore.store_name}
+                      onChange={(e) => setNewStore({ ...newStore, store_name: e.target.value })}
+                      placeholder="マイショップ"
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-[#06C755] focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
+                    />
+                  </div>
+                  {newStore.platform === "shopify" && (
+                    <>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-gray-700">Shopifyドメイン</label>
+                        <input
+                          type="text"
+                          value={newStore.shopify_domain}
+                          onChange={(e) => setNewStore({ ...newStore, shopify_domain: e.target.value })}
+                          placeholder="myshop.myshopify.com"
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-[#06C755] focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-gray-700">アクセストークン</label>
+                        <input
+                          type="password"
+                          value={newStore.shopify_access_token}
+                          onChange={(e) => setNewStore({ ...newStore, shopify_access_token: e.target.value })}
+                          placeholder="shpat_xxxxx"
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-[#06C755] focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
+                        />
+                      </div>
+                    </>
                   )}
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={handleAddStore}
+                    className="rounded-lg bg-[#06C755] px-4 py-2 text-sm font-medium text-white hover:bg-[#05A649]"
+                  >
+                    追加
+                  </button>
+                  <button
+                    onClick={() => setShowAddStore(false)}
+                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {stores.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
+                  <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35" />
+                  </svg>
+                </div>
+                <p className="text-sm text-gray-500">まだストアが連携されていません</p>
+                <button
+                  onClick={() => setShowAddStore(true)}
+                  className="mt-3 text-sm font-medium text-[#06C755] hover:underline"
+                >
+                  ストアを追加する
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Recent Orders */}
-      <div className="rounded-xl border border-gray-200 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-gray-900">最近の注文</h2>
-          <Link href="/ec/orders" className="text-sm font-medium text-[#06C755] hover:underline">
-            すべて表示
-          </Link>
-        </div>
-
-        {orders.length === 0 ? (
-          <div className="px-6 py-12 text-center">
-            <p className="text-sm text-gray-500">まだ注文がありません</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-xs font-medium text-gray-500">
-                  <th className="px-6 py-3">注文ID</th>
-                  <th className="px-6 py-3">プラットフォーム</th>
-                  <th className="px-6 py-3">顧客名</th>
-                  <th className="px-6 py-3">金額</th>
-                  <th className="px-6 py-3">ステータス</th>
-                  <th className="px-6 py-3">LINE紐付け</th>
-                  <th className="px-6 py-3">注文日</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-3 text-sm font-mono text-gray-700">
-                      {order.external_order_id.slice(0, 12)}
-                    </td>
-                    <td className="px-6 py-3">
-                      <div className="flex items-center gap-2">
-                        {platformIcon(order.platform)}
-                        <span className="text-sm text-gray-700 capitalize">{order.platform}</span>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {stores.map((store) => (
+                  <div key={store.id} className="flex items-center justify-between px-6 py-4">
+                    <div className="flex items-center gap-4">
+                      <PlatformIcon platform={store.platform} />
+                      <div>
+                        <p className="font-medium text-gray-900">{store.store_name}</p>
+                        <p className="text-xs text-gray-500">
+                          {store.platform === "shopify" ? store.shopify_domain : store.platform.toUpperCase()}
+                          {store.last_synced_at && (
+                            <span className="ml-2 text-gray-400">
+                              最終同期: {new Date(store.last_synced_at).toLocaleString("ja-JP")}
+                            </span>
+                          )}
+                        </p>
                       </div>
-                    </td>
-                    <td className="px-6 py-3 text-sm text-gray-700">{order.customer_name || order.customer_email || "-"}</td>
-                    <td className="px-6 py-3 text-sm font-medium text-gray-900">
-                      {order.currency === "JPY" ? "¥" : "$"}{order.total_amount?.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-3">{statusBadge(order.order_status)}</td>
-                    <td className="px-6 py-3">
-                      {order.friend_id ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#06C755]/10 px-2 py-0.5 text-xs font-medium text-[#06C755]">
-                          <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2C6.48 2 2 5.58 2 10c0 2.24 1.12 4.27 2.94 5.76-.17.62-.94 3.31-.97 3.54 0 0-.02.17.09.24.11.06.24.01.24.01.33-.05 3.82-2.5 4.36-2.87.43.06.87.1 1.34.1 5.52 0 10-3.58 10-8 0-4.42-4.48-8-10-8z" />
-                          </svg>
-                          紐付済
-                        </span>
+                    </div>
+                    <button
+                      onClick={() => handleSync(store.id)}
+                      disabled={syncing === store.id}
+                      className="flex items-center gap-1.5 rounded-lg border border-[#06C755] px-3 py-1.5 text-sm font-medium text-[#06C755] transition-colors hover:bg-[#06C755]/5 disabled:opacity-50"
+                    >
+                      {syncing === store.id ? (
+                        <>
+                          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#06C755] border-t-transparent" />
+                          同期中...
+                        </>
                       ) : (
-                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
-                          未紐付
-                        </span>
+                        <>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                          </svg>
+                          同期
+                        </>
                       )}
-                    </td>
-                    <td className="px-6 py-3 text-sm text-gray-500">
-                      {order.ordered_at ? new Date(order.ordered_at).toLocaleDateString("ja-JP") : "-"}
-                    </td>
-                  </tr>
+                    </button>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Bottom Row: Link Stats + Followup Stats */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Customer Link Stats */}
-        <div className="rounded-xl border border-gray-200 bg-white">
-          <div className="border-b border-gray-100 px-6 py-4">
-            <h2 className="text-base font-semibold text-gray-900">顧客紐付け</h2>
-          </div>
-          <div className="p-6">
-            <div className="mb-4 flex items-center gap-6">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-[#06C755]">{linkStats.linked}</p>
-                <p className="text-xs text-gray-500">紐付け済み</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-bold text-orange-500">{linkStats.unlinked}</p>
-                <p className="text-xs text-gray-500">未紐付け</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-bold text-gray-900">
-                  {linkStats.linked + linkStats.unlinked > 0
-                    ? Math.round((linkStats.linked / (linkStats.linked + linkStats.unlinked)) * 100)
-                    : 0}%
-                </p>
-                <p className="text-xs text-gray-500">紐付け率</p>
-              </div>
+          {/* Recent Orders */}
+          <div className="rounded-xl border border-gray-200 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+              <h2 className="font-semibold text-gray-900">最近の注文</h2>
+              <Link href="/ec/orders" className="text-sm font-medium text-[#06C755] hover:underline">
+                すべて表示
+              </Link>
             </div>
-            {linkStats.linked + linkStats.unlinked > 0 && (
-              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                <div
-                  className="h-full rounded-full bg-[#06C755] transition-all"
-                  style={{
-                    width: `${(linkStats.linked / (linkStats.linked + linkStats.unlinked)) * 100}%`,
-                  }}
-                />
+
+            {orders.length === 0 ? (
+              <div className="p-12 text-center">
+                <p className="text-sm text-gray-500">まだ注文がありません</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-50 text-left text-xs font-medium text-gray-500">
+                      <th className="px-6 py-3">PF</th>
+                      <th className="px-6 py-3">顧客</th>
+                      <th className="px-6 py-3">金額</th>
+                      <th className="px-6 py-3">ステータス</th>
+                      <th className="px-6 py-3">LINE</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {orders.slice(0, 5).map((order) => {
+                      const statusInfo = statusConfig[order.order_status] ?? statusConfig.pending;
+                      return (
+                        <tr key={order.id} className="hover:bg-gray-50/50">
+                          <td className="px-6 py-3">
+                            <PlatformIcon platform={order.platform} />
+                          </td>
+                          <td className="px-6 py-3">
+                            <p className="text-sm font-medium text-gray-900">{order.customer_name || order.customer_email || "-"}</p>
+                          </td>
+                          <td className="px-6 py-3 text-sm font-medium text-gray-900">
+                            {order.currency === "JPY" ? "¥" : "$"}{order.total_amount?.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-3">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusInfo.className}`}>
+                              {statusInfo.label}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3">
+                            {order.friend_id ? (
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#06C755]">
+                                <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                              </span>
+                            ) : (
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gray-200">
+                                <svg className="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         </div>
 
-        {/* Followup Stats */}
-        <div className="rounded-xl border border-gray-200 bg-white">
-          <div className="border-b border-gray-100 px-6 py-4">
-            <h2 className="text-base font-semibold text-gray-900">フォローアップ状況</h2>
+        {/* Right Column - Link Stats + Followup Stats */}
+        <div className="space-y-6">
+          {/* Customer Link Stats */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <h2 className="font-semibold text-gray-900">顧客紐付け状況</h2>
+            
+            <div className="mt-6">
+              {/* Donut chart placeholder */}
+              <div className="relative mx-auto h-32 w-32">
+                <svg className="h-32 w-32 -rotate-90" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="40" fill="none" stroke="#E2E8F0" strokeWidth="12" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="40"
+                    fill="none"
+                    stroke="#06C755"
+                    strokeWidth="12"
+                    strokeDasharray={`${linkRate * 2.51} 251`}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-gray-900">{linkRate}%</p>
+                    <p className="text-xs text-gray-500">紐付け率</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-[#06C755]" />
+                    <span className="text-sm text-gray-600">紐付け済み</span>
+                  </div>
+                  <span className="font-semibold text-gray-900">{linkStats.linked}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-gray-200" />
+                    <span className="text-sm text-gray-600">未紐付け</span>
+                  </div>
+                  <span className="font-semibold text-gray-900">{linkStats.unlinked}</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="p-6">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="rounded-lg bg-blue-50 p-4 text-center">
-                <p className="text-2xl font-bold text-blue-600">{followupStats.scheduled}</p>
-                <p className="mt-1 text-xs font-medium text-blue-600">予定</p>
+
+          {/* Followup Pipeline */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <h2 className="font-semibold text-gray-900">フォローアップ状況</h2>
+            
+            <div className="mt-6 space-y-4">
+              <div className="rounded-lg bg-blue-50 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-blue-700">予定</span>
+                  <span className="text-2xl font-bold text-blue-700">{followupStats.scheduled}</span>
+                </div>
               </div>
-              <div className="rounded-lg bg-green-50 p-4 text-center">
-                <p className="text-2xl font-bold text-green-600">{followupStats.sent}</p>
-                <p className="mt-1 text-xs font-medium text-green-600">送信済み</p>
+              <div className="rounded-lg bg-[#06C755]/10 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-[#06C755]">送信済み</span>
+                  <span className="text-2xl font-bold text-[#06C755]">{followupStats.sent}</span>
+                </div>
               </div>
-              <div className="rounded-lg bg-red-50 p-4 text-center">
-                <p className="text-2xl font-bold text-red-600">{followupStats.failed}</p>
-                <p className="mt-1 text-xs font-medium text-red-600">失敗</p>
+              <div className="rounded-lg bg-red-50 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-red-600">失敗</span>
+                  <span className="text-2xl font-bold text-red-600">{followupStats.failed}</span>
+                </div>
               </div>
             </div>
           </div>

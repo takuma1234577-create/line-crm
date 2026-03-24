@@ -13,6 +13,7 @@ interface ChatFriend {
     content: { text?: string; data?: string } | string;
     created_at: string;
     direction: string;
+    read_at: string | null;
   }[];
 }
 
@@ -33,6 +34,20 @@ function getContentText(content: { text?: string; data?: string } | string): str
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   return date.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (date.toDateString() === today.toDateString()) {
+    return "今日";
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    return "昨日";
+  }
+  return date.toLocaleDateString("ja-JP", { month: "short", day: "numeric" });
 }
 
 function timeAgo(dateStr: string): string {
@@ -57,7 +72,10 @@ export default function ChatPage() {
   const [loadingFriends, setLoadingFriends] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterUnread, setFilterUnread] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedFriend = friends.find((f) => f.id === selectedFriendId);
 
@@ -67,7 +85,7 @@ export default function ChatPage() {
     const { data, error } = await supabase
       .from("friends")
       .select(
-        "id, display_name, picture_url, chat_messages(content, created_at, direction)"
+        "id, display_name, picture_url, chat_messages(content, created_at, direction, read_at)"
       )
       .eq("channel_id", CHANNEL_ID)
       .order("created_at", {
@@ -80,7 +98,6 @@ export default function ChatPage() {
       console.error("Error fetching friends:", error);
     }
 
-    // Filter to only friends that have messages, then sort by latest message
     const friendsWithMessages = ((data as ChatFriend[]) ?? [])
       .filter((f) => f.chat_messages && f.chat_messages.length > 0)
       .sort((a, b) => {
@@ -109,7 +126,6 @@ export default function ChatPage() {
     setMessages((data as Message[]) ?? []);
     setLoadingMessages(false);
 
-    // Mark inbound messages as read
     await supabase
       .from("chat_messages")
       .update({ read_at: new Date().toISOString() })
@@ -128,12 +144,10 @@ export default function ChatPage() {
     }
   }, [selectedFriendId, fetchMessages]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Subscribe to realtime updates on chat_messages
   useEffect(() => {
     const channel = supabase
       .channel("chat_messages_realtime")
@@ -147,15 +161,12 @@ export default function ChatPage() {
         (payload) => {
           const newMsg = payload.new as Message;
 
-          // If the new message belongs to the selected friend, add it
           if (selectedFriendId && newMsg.friend_id === selectedFriendId) {
             setMessages((prev) => {
-              // Avoid duplicates
               if (prev.some((m) => m.id === newMsg.id)) return prev;
               return [...prev, newMsg];
             });
 
-            // Mark as read if inbound
             if (newMsg.direction === "inbound") {
               supabase
                 .from("chat_messages")
@@ -165,7 +176,6 @@ export default function ChatPage() {
             }
           }
 
-          // Refresh friends list to update preview
           fetchFriends();
         }
       )
@@ -195,7 +205,6 @@ export default function ChatPage() {
         alert("メッセージの送信に失敗しました");
         setInputMessage(message);
       } else {
-        // Refresh messages and friends list
         await fetchMessages(selectedFriendId);
         await fetchFriends();
       }
@@ -208,195 +217,299 @@ export default function ChatPage() {
     setSending(false);
   };
 
+  // Filter friends
+  const filteredFriends = friends.filter((friend) => {
+    const matchesSearch = !searchQuery || 
+      friend.display_name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesUnread = !filterUnread || 
+      (friend.chat_messages[0]?.direction === "inbound" && !friend.chat_messages[0]?.read_at);
+    return matchesSearch && matchesUnread;
+  });
+
+  // Check if friend has unread messages
+  const hasUnread = (friend: ChatFriend) => {
+    return friend.chat_messages[0]?.direction === "inbound" && !friend.chat_messages[0]?.read_at;
+  };
+
   return (
-    <div className="flex h-[calc(100vh-8rem)] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div className="flex h-full overflow-hidden bg-[#F7F8FA]">
       {/* Left panel: chat list */}
       <div
-        className={`w-full border-r border-gray-200 sm:w-80 sm:shrink-0 ${
-          selectedFriendId ? "hidden sm:block" : ""
+        className={`flex w-full flex-col border-r border-gray-200 bg-white sm:w-80 lg:w-96 sm:shrink-0 ${
+          selectedFriendId ? "hidden sm:flex" : "flex"
         }`}
       >
-        <div className="border-b border-gray-200 p-3">
-          <input
-            type="text"
-            placeholder="チャットを検索..."
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#06C755] focus:outline-none focus:ring-1 focus:ring-[#06C755]"
-          />
+        {/* Search & Filter */}
+        <div className="shrink-0 border-b border-gray-100 p-4 space-y-3">
+          <div className="relative">
+            <svg
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="チャットを検索..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm focus:border-[#06C755] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setFilterUnread(false)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                !filterUnread
+                  ? "bg-[#06C755] text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              全て
+            </button>
+            <button
+              onClick={() => setFilterUnread(true)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                filterUnread
+                  ? "bg-[#06C755] text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              未返信
+            </button>
+          </div>
         </div>
-        <ul className="overflow-y-auto" style={{ height: "calc(100% - 52px)" }}>
+
+        {/* Friend list */}
+        <div className="flex-1 overflow-y-auto">
           {loadingFriends ? (
-            [...Array(5)].map((_, i) => (
-              <li key={i} className="flex items-start gap-3 px-4 py-3">
-                <div className="h-10 w-10 animate-pulse rounded-full bg-gray-200" />
-                <div className="flex-1">
-                  <div className="h-4 w-20 animate-pulse rounded bg-gray-200" />
-                  <div className="mt-1 h-3 w-40 animate-pulse rounded bg-gray-200" />
+            <div className="space-y-1 p-2">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-lg p-3">
+                  <div className="h-12 w-12 animate-pulse rounded-full bg-gray-200" />
+                  <div className="flex-1">
+                    <div className="h-4 w-24 animate-pulse rounded bg-gray-200" />
+                    <div className="mt-1.5 h-3 w-36 animate-pulse rounded bg-gray-200" />
+                  </div>
                 </div>
-              </li>
-            ))
-          ) : friends.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-gray-400">
-              チャット履歴がありません
-            </li>
+              ))}
+            </div>
+          ) : filteredFriends.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
+                <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                </svg>
+              </div>
+              <p className="mt-3 text-sm text-gray-500">チャット履歴がありません</p>
+            </div>
           ) : (
-            friends.map((friend) => {
-              const lastMsg = friend.chat_messages?.[0];
-              return (
-                <li key={friend.id}>
+            <div className="p-2 space-y-0.5">
+              {filteredFriends.map((friend) => {
+                const lastMsg = friend.chat_messages?.[0];
+                const isUnread = hasUnread(friend);
+                const isSelected = selectedFriendId === friend.id;
+                
+                return (
                   <button
+                    key={friend.id}
                     onClick={() => setSelectedFriendId(friend.id)}
-                    className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${
-                      selectedFriendId === friend.id
-                        ? "bg-[#06C755]/5"
+                    className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition-all ${
+                      isSelected
+                        ? "bg-[#06C755]/10"
                         : "hover:bg-gray-50"
                     }`}
                   >
-                    {friend.picture_url ? (
-                      <img
-                        src={friend.picture_url}
-                        alt={friend.display_name}
-                        className="h-10 w-10 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#06C755]/10 text-sm font-bold text-[#06C755]">
-                        {friend.display_name?.charAt(0) ?? "?"}
-                      </div>
-                    )}
+                    <div className="relative">
+                      {friend.picture_url ? (
+                        <img
+                          src={friend.picture_url}
+                          alt={friend.display_name}
+                          className="h-12 w-12 shrink-0 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#06C755]/10 text-sm font-bold text-[#06C755]">
+                          {friend.display_name?.charAt(0) ?? "?"}
+                        </div>
+                      )}
+                      {isUnread && (
+                        <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-orange-500" />
+                      )}
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`truncate text-sm ${isUnread ? "font-semibold text-gray-900" : "font-medium text-gray-900"}`}>
                           {friend.display_name}
                         </span>
                         {lastMsg && (
-                          <span className="text-xs text-gray-400">
+                          <span className="shrink-0 text-xs text-gray-400">
                             {timeAgo(lastMsg.created_at)}
                           </span>
                         )}
                       </div>
                       {lastMsg && (
-                        <p className="truncate text-xs text-gray-500">
-                          {lastMsg.direction === "outbound" ? "あなた: " : ""}
+                        <p className={`mt-0.5 truncate text-xs ${isUnread ? "font-medium text-gray-700" : "text-gray-500"}`}>
+                          {lastMsg.direction === "outbound" && (
+                            <span className="text-gray-400">あなた: </span>
+                          )}
                           {getContentText(lastMsg.content)}
                         </p>
                       )}
                     </div>
                   </button>
-                </li>
-              );
-            })
+                );
+              })}
+            </div>
           )}
-        </ul>
+        </div>
       </div>
 
       {/* Right panel: chat window */}
       <div
-        className={`flex flex-1 flex-col ${
+        className={`flex flex-1 flex-col bg-[#F7F8FA] ${
           !selectedFriendId ? "hidden sm:flex" : "flex"
         }`}
       >
         {selectedFriendId && selectedFriend ? (
           <>
             {/* Chat header */}
-            <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-3">
+            <div className="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3">
               <button
-                className="sm:hidden"
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 sm:hidden"
                 onClick={() => setSelectedFriendId(null)}
               >
-                <svg
-                  className="h-5 w-5 text-gray-600"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              {selectedFriend.picture_url ? (
-                <img
-                  src={selectedFriend.picture_url}
-                  alt={selectedFriend.display_name}
-                  className="h-8 w-8 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#06C755]/10 text-sm font-bold text-[#06C755]">
-                  {selectedFriend.display_name?.charAt(0) ?? "?"}
-                </div>
-              )}
-              <span className="font-medium text-gray-900">
-                {selectedFriend.display_name}
-              </span>
+              <div className="relative">
+                {selectedFriend.picture_url ? (
+                  <img
+                    src={selectedFriend.picture_url}
+                    alt={selectedFriend.display_name}
+                    className="h-10 w-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#06C755]/10 text-sm font-bold text-[#06C755]">
+                    {selectedFriend.display_name?.charAt(0) ?? "?"}
+                  </div>
+                )}
+                <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#06C755]" />
+              </div>
+              <div className="flex-1">
+                <span className="font-medium text-gray-900">{selectedFriend.display_name}</span>
+                <p className="text-xs text-gray-500">オンライン</p>
+              </div>
+              <button className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                </svg>
+              </button>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto p-4">
               {loadingMessages ? (
                 <div className="flex items-center justify-center py-12">
-                  <div className="text-sm text-gray-400">読み込み中...</div>
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#06C755] border-t-transparent" />
                 </div>
               ) : messages.length === 0 ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="text-sm text-gray-400">メッセージはありません</div>
+                <div className="flex flex-col items-center justify-center py-16">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
+                    <svg className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                    </svg>
+                  </div>
+                  <p className="mt-4 text-sm text-gray-500">メッセージはありません</p>
+                  <p className="text-xs text-gray-400">会話を始めましょう</p>
                 </div>
               ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${
-                      msg.direction === "outbound" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <div
-                      className={`max-w-xs rounded-2xl px-4 py-2 text-sm lg:max-w-md ${
-                        msg.direction === "outbound"
-                          ? "bg-[#06C755] text-white"
-                          : "bg-gray-100 text-gray-900"
-                      }`}
-                    >
-                      <p>{getContentText(msg.content)}</p>
-                      <p
-                        className={`mt-1 text-xs ${
-                          msg.direction === "outbound"
-                            ? "text-white/70"
-                            : "text-gray-400"
-                        }`}
-                      >
-                        {formatTime(msg.created_at)}
-                      </p>
-                    </div>
-                  </div>
-                ))
+                <div className="mx-auto max-w-2xl space-y-4">
+                  {messages.map((msg, index) => {
+                    const isOutbound = msg.direction === "outbound";
+                    const showDateDivider = index === 0 || 
+                      formatDate(messages[index - 1].created_at) !== formatDate(msg.created_at);
+                    
+                    return (
+                      <div key={msg.id}>
+                        {showDateDivider && (
+                          <div className="flex items-center justify-center py-4">
+                            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-500">
+                              {formatDate(msg.created_at)}
+                            </span>
+                          </div>
+                        )}
+                        <div className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
+                          <div className={`group relative max-w-xs lg:max-w-md ${isOutbound ? "" : "pl-2"}`}>
+                            <div
+                              className={`rounded-2xl px-4 py-2.5 ${
+                                isOutbound
+                                  ? "bg-[#06C755] text-white"
+                                  : "bg-white text-gray-900 shadow-sm border border-gray-100"
+                              }`}
+                            >
+                              <p className="whitespace-pre-wrap text-sm">{getContentText(msg.content)}</p>
+                            </div>
+                            <p
+                              className={`mt-1 text-xs text-gray-400 opacity-0 transition-opacity group-hover:opacity-100 ${
+                                isOutbound ? "text-right" : "text-left"
+                              }`}
+                            >
+                              {formatTime(msg.created_at)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
               )}
-              <div ref={messagesEndRef} />
             </div>
 
             {/* Input */}
-            <div className="border-t border-gray-200 p-3">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  placeholder="メッセージを入力..."
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#06C755] focus:outline-none focus:ring-1 focus:ring-[#06C755]"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  disabled={sending}
-                />
+            <div className="shrink-0 border-t border-gray-200 bg-white p-4">
+              <div className="mx-auto flex max-w-2xl items-end gap-3">
+                {/* Quick reply button */}
+                <button className="shrink-0 rounded-lg p-2.5 text-gray-500 hover:bg-gray-100">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                </button>
+                
+                <div className="relative flex-1">
+                  <textarea
+                    ref={inputRef}
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    placeholder="メッセージを入力..."
+                    rows={1}
+                    className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm focus:border-[#06C755] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755]/20"
+                    style={{ maxHeight: "120px" }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    disabled={sending}
+                  />
+                </div>
+
                 <button
                   onClick={handleSend}
                   disabled={sending || !inputMessage.trim()}
-                  className="rounded-lg bg-[#06C755] px-4 py-2 text-sm font-medium text-white hover:bg-[#05b34c] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#06C755] text-white transition-all hover:bg-[#05A649] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {sending ? "送信中..." : "送信"}
+                  {sending ? (
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : (
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>
@@ -404,22 +517,13 @@ export default function ChatPage() {
         ) : (
           <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-                <svg
-                  className="h-8 w-8 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                  />
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100">
+                <svg className="h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
                 </svg>
               </div>
-              <p className="text-gray-500">友だちを選択してください</p>
+              <p className="text-lg font-medium text-gray-900">メッセージを選択</p>
+              <p className="mt-1 text-sm text-gray-500">左側から会話を選択してください</p>
             </div>
           </div>
         )}
