@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     const MAX_ITERATIONS = 10
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
         system: systemPrompt,
         tools: crmTools as any,
@@ -202,9 +202,11 @@ export async function POST(request: Request) {
       },
     })
   } catch (err: any) {
-    console.error('[ai/chat] error:', err)
+    const errType = err?.error?.error?.type ?? 'unknown'
+    const errMsg = err?.error?.error?.message ?? err?.message ?? 'unknown'
+    console.error(`[ai/chat] status=${err?.status} type=${errType} msg=${errMsg}`)
     return Response.json(
-      { error: err.message ?? 'Internal server error' },
+      { error: errMsg },
       { status: 500 }
     )
   }

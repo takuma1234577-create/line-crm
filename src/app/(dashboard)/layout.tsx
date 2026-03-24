@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const navGroups = [
   {
@@ -29,14 +29,14 @@ const navGroups = [
     label: "自動化",
     items: [
       { href: "/ai/settings", label: "AI自動返信設定", icon: "zap" },
-      { href: "/auto-reply", label: "自動応答", icon: "reply" },
-      { href: "/step-delivery", label: "ステップ配信", icon: "steps" },
+      { href: "/auto-response", label: "自動応答", icon: "reply" },
+      { href: "/steps", label: "ステップ配信", icon: "steps" },
     ],
   },
   {
     label: "コンテンツ",
     items: [
-      { href: "/rich-menu", label: "リッチメニュー", icon: "menu" },
+      { href: "/rich-menus", label: "リッチメニュー", icon: "menu" },
       { href: "/templates", label: "テンプレート", icon: "template" },
       { href: "/forms", label: "フォーム", icon: "form" },
       { href: "/knowledge", label: "ナレッジベース", icon: "book" },
@@ -63,7 +63,7 @@ const navGroups = [
   {
     label: null,
     items: [
-      { href: "/settings/channel", label: "設定", icon: "settings" },
+      { href: "/settings", label: "設定", icon: "settings" },
     ],
   },
 ];
@@ -200,10 +200,41 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
       );
+    case "bell":
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+        </svg>
+      );
     default:
       return null;
   }
 }
+
+// Page title mapping
+const pageTitles: Record<string, { title: string; description?: string }> = {
+  "/dashboard": { title: "ダッシュボード", description: "概要と統計情報" },
+  "/ai": { title: "AIアシスタント", description: "AIに指示を出す" },
+  "/ai/logs": { title: "AI返信ログ", description: "自動返信の履歴" },
+  "/ai/settings": { title: "AI自動返信設定", description: "AIの動作を設定" },
+  "/chat": { title: "1:1チャット", description: "友だちとの会話" },
+  "/broadcasts": { title: "配信管理", description: "一斉配信を管理" },
+  "/friends": { title: "友だち一覧", description: "LINE友だちを管理" },
+  "/tags": { title: "タグ管理", description: "友だちを分類" },
+  "/ec": { title: "EC連携", description: "ECストアを管理" },
+  "/ec/orders": { title: "注文一覧", description: "EC注文を管理" },
+  "/ec/products": { title: "商品管理", description: "商品情報を管理" },
+  "/knowledge": { title: "ナレッジベース", description: "AIの知識を管理" },
+  "/templates": { title: "テンプレート", description: "メッセージテンプレート" },
+  "/forms": { title: "フォーム", description: "カスタムフォーム" },
+  "/rich-menus": { title: "リッチメニュー", description: "メニューを設定" },
+  "/settings": { title: "設定", description: "アカウント設定" },
+  "/analytics/urls": { title: "URL計測", description: "リンクのトラッキング" },
+  "/analytics/conversions": { title: "コンバージョン", description: "目標の達成状況" },
+  "/analytics/sources": { title: "流入経路", description: "友だち追加の経路" },
+  "/auto-response": { title: "自動応答", description: "自動応答ルール" },
+  "/steps": { title: "ステップ配信", description: "自動配信シナリオ" },
+};
 
 export default function DashboardLayout({
   children,
@@ -212,105 +243,220 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const isAIPage = pathname === "/ai";
+  const isChatPage = pathname === "/chat";
+  const isFullWidthPage = isAIPage || isChatPage;
+
+  // Get current page info
+  const currentPage = pageTitles[pathname] || { title: "LINE CRM", description: "" };
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-[#F7F8FA]">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-gray-950 text-white transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-[#0D0D12] text-white transition-all duration-300 lg:static ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        } lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[68px]" : "lg:w-60"}`}
       >
-        {/* Logo */}
-        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-gray-800/50 px-5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#06C755]">
-            <svg viewBox="0 0 24 24" fill="white" className="h-4 w-4">
-              <path d="M12 2C6.48 2 2 5.58 2 10c0 2.24 1.12 4.27 2.94 5.76-.17.62-.94 3.31-.97 3.54 0 0-.02.17.09.24.11.06.24.01.24.01.33-.05 3.82-2.5 4.36-2.87.43.06.87.1 1.34.1 5.52 0 10-3.58 10-8 0-4.42-4.48-8-10-8z" />
-            </svg>
-          </div>
-          <span className="text-sm font-bold tracking-tight">LINE CRM</span>
-          <span className="ml-1 h-2 w-2 rounded-full bg-[#06C755]" />
-          {/* Mobile close */}
+        {/* Logo area */}
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/5 px-4">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-[#06C755]">
+              <svg viewBox="0 0 24 24" fill="white" className="h-4.5 w-4.5">
+                <path d="M12 2C6.48 2 2 5.58 2 10c0 2.24 1.12 4.27 2.94 5.76-.17.62-.94 3.31-.97 3.54 0 0-.02.17.09.24.11.06.24.01.24.01.33-.05 3.82-2.5 4.36-2.87.43.06.87.1 1.34.1 5.52 0 10-3.58 10-8 0-4.42-4.48-8-10-8z" />
+              </svg>
+              {/* Pulse indicator */}
+              <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#06C755] opacity-75"></span>
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#06C755]"></span>
+              </span>
+            </div>
+            {!sidebarCollapsed && (
+              <span className="text-sm font-bold tracking-tight">LINE CRM</span>
+            )}
+          </Link>
+          
+          {/* Collapse button (desktop) / Close button (mobile) */}
           <button
-            className="ml-auto lg:hidden"
+            className="hidden rounded-md p-1.5 text-gray-400 hover:bg-white/5 hover:text-white lg:block"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sidebarCollapsed ? "M13 5l7 7-7 7M5 5l7 7-7 7" : "M11 19l-7-7 7-7m8 14l-7-7 7-7"} />
+            </svg>
+          </button>
+          <button
+            className="lg:hidden rounded-md p-1.5 text-gray-400 hover:bg-white/5"
             onClick={() => setSidebarOpen(false)}
           >
-            <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-3">
+        <nav className="sidebar-scroll flex-1 overflow-y-auto px-3 py-4">
           {navGroups.map((group, gi) => (
-            <div key={gi} className={gi > 0 ? "mt-4" : ""}>
-              {group.label && (
-                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+            <div key={gi} className={gi > 0 ? "mt-6" : ""}>
+              {group.label && !sidebarCollapsed && (
+                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-gray-500">
                   {group.label}
                 </p>
               )}
               {gi > 0 && gi < navGroups.length - 1 && !group.label && (
-                <div className="my-2 border-t border-gray-800/50" />
+                <div className="my-4 border-t border-white/5" />
               )}
-              {group.items.map((item) => {
-                const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href + "/"));
-                const isAI = item.icon === "bot";
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={`group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition-colors ${
-                      isActive
-                        ? isAI
-                          ? "bg-[#06C755]/15 text-[#06C755] font-medium border-l-2 border-[#06C755] -ml-0.5 pl-[10px]"
-                          : "bg-white/5 text-white font-medium border-l-2 border-[#06C755] -ml-0.5 pl-[10px]"
-                        : isAI
-                          ? "text-gray-300 hover:bg-white/5 hover:text-white font-medium"
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href + "/"));
+                  const isAI = item.icon === "bot";
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] transition-all ${
+                        isActive
+                          ? isAI
+                            ? "bg-[#06C755]/15 text-[#06C755] font-medium"
+                            : "bg-white/10 text-white font-medium"
                           : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
-                    }`}
-                  >
-                    <span className={`shrink-0 ${isActive && isAI ? "text-[#06C755]" : isActive ? "text-[#06C755]" : "text-gray-500 group-hover:text-gray-400"}`}>
-                      <NavIcon name={item.icon} />
-                    </span>
-                    {item.label}
-                  </Link>
-                );
-              })}
+                      } ${sidebarCollapsed ? "justify-center" : ""}`}
+                      title={sidebarCollapsed ? item.label : undefined}
+                    >
+                      {/* Active indicator bar */}
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-[#06C755]" />
+                      )}
+                      <span className={`shrink-0 ${isActive ? "text-[#06C755]" : "text-gray-500 group-hover:text-gray-400"}`}>
+                        <NavIcon name={item.icon} />
+                      </span>
+                      {!sidebarCollapsed && item.label}
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </nav>
+
+        {/* User section at bottom */}
+        {!sidebarCollapsed && (
+          <div className="shrink-0 border-t border-white/5 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#06C755] to-[#05A649] text-sm font-bold text-white">
+                U
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-sm font-medium text-white">ユーザー名</p>
+                <p className="truncate text-xs text-gray-500">管理者</p>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Minimal mobile header - no title bar to save space */}
-        <header className="flex h-12 shrink-0 items-center gap-4 border-b border-gray-200 bg-white px-4 lg:hidden">
-          <button
-            onClick={() => setSidebarOpen(true)}
-          >
-            <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <span className="text-sm font-semibold text-gray-900">LINE CRM</span>
+        {/* Top header */}
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200/80 bg-white px-4 lg:px-6">
+          <div className="flex items-center gap-4">
+            {/* Mobile menu button */}
+            <button
+              className="lg:hidden rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            {/* Page title */}
+            <div>
+              <h1 className="text-lg font-semibold text-gray-900">{currentPage.title}</h1>
+              {currentPage.description && (
+                <p className="hidden text-xs text-gray-500 sm:block">{currentPage.description}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Global search */}
+            <button className="hidden items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2 text-sm text-gray-500 hover:bg-gray-100 sm:flex">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <span>検索...</span>
+              <kbd className="hidden rounded border border-gray-300 bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 lg:inline">⌘K</kbd>
+            </button>
+
+            {/* Notification bell */}
+            <button className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100">
+              <NavIcon name="bell" className="h-5 w-5" />
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#06C755]" />
+            </button>
+          </div>
         </header>
 
-        {/* Page content - full height for AI page */}
-        <main className={isAIPage ? "flex-1 overflow-hidden" : "flex-1 overflow-y-auto p-6"}>
+        {/* Page content */}
+        <main className={isFullWidthPage ? "flex-1 overflow-hidden" : "flex-1 overflow-y-auto p-4 lg:p-6"}>
           {children}
         </main>
+
+        {/* Mobile bottom navigation */}
+        <nav className="flex shrink-0 items-center justify-around border-t border-gray-200 bg-white py-2 lg:hidden">
+          <Link
+            href="/dashboard"
+            className={`flex flex-col items-center gap-1 px-3 py-1 ${pathname === "/dashboard" ? "text-[#06C755]" : "text-gray-500"}`}
+          >
+            <NavIcon name="chart" className="h-5 w-5" />
+            <span className="text-[10px] font-medium">ホーム</span>
+          </Link>
+          <Link
+            href="/chat"
+            className={`flex flex-col items-center gap-1 px-3 py-1 ${pathname === "/chat" ? "text-[#06C755]" : "text-gray-500"}`}
+          >
+            <NavIcon name="chat" className="h-5 w-5" />
+            <span className="text-[10px] font-medium">チャット</span>
+          </Link>
+          <Link
+            href="/ai"
+            className={`flex flex-col items-center gap-1 px-3 py-1 ${pathname === "/ai" ? "text-[#06C755]" : "text-gray-500"}`}
+          >
+            <NavIcon name="bot" className="h-5 w-5" />
+            <span className="text-[10px] font-medium">AI</span>
+          </Link>
+          <Link
+            href="/broadcasts"
+            className={`flex flex-col items-center gap-1 px-3 py-1 ${pathname === "/broadcasts" ? "text-[#06C755]" : "text-gray-500"}`}
+          >
+            <NavIcon name="megaphone" className="h-5 w-5" />
+            <span className="text-[10px] font-medium">配信</span>
+          </Link>
+          <Link
+            href="/settings"
+            className={`flex flex-col items-center gap-1 px-3 py-1 ${pathname === "/settings" ? "text-[#06C755]" : "text-gray-500"}`}
+          >
+            <NavIcon name="settings" className="h-5 w-5" />
+            <span className="text-[10px] font-medium">設定</span>
+          </Link>
+        </nav>
       </div>
     </div>
   );
