@@ -171,14 +171,55 @@ export default function AIPage() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Drag & drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      processFiles(files);
+    }
+  }, []);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
+    processFiles(files);
+  };
 
+  const processFiles = async (files: File[]) => {
     for (const file of files) {
       if (!ACCEPTED_TYPES.includes(file.type)) {
         alert(`非対応のファイル形式です: ${file.name}\n対応形式: JPEG, PNG, GIF, WebP, PDF`);
@@ -373,7 +414,28 @@ export default function AIPage() {
   const isEmptyState = messages.length === 1 && messages[0].id === "assistant-welcome";
 
   return (
-    <div className="flex h-full bg-[#F7F8FA]">
+    <div
+      className="relative flex h-full bg-[#F7F8FA]"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag & Drop Overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[#06C755]/10 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-[#06C755] bg-white/90 px-12 py-10 shadow-lg">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#06C755]/10">
+              <svg className="h-8 w-8 text-[#06C755]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+            </div>
+            <p className="text-lg font-semibold text-gray-900">ファイルをドロップ</p>
+            <p className="text-sm text-gray-500">画像（5MB以下）・PDF（32MB以下）</p>
+          </div>
+        </div>
+      )}
+
       {/* Conversation History Sidebar - Hidden on mobile */}
       <div
         className={`hidden border-r border-gray-200 bg-white transition-all duration-200 lg:block ${

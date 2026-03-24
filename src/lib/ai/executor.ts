@@ -79,6 +79,10 @@ export async function executeToolCall(
         return await ecSyncOrders(cid, toolInput)
       case 'ec_get_stats':
         return await ecGetStats(cid, toolInput)
+      case 'ec_get_products':
+        return await ecGetProducts(cid, toolInput)
+      case 'ec_get_store_pages':
+        return await ecGetStorePages(cid, toolInput)
       default:
         return `エラー: 不明なツール「${toolName}」`
     }
@@ -2216,4 +2220,142 @@ ${platformLines || '  データなし'}
 
 🏆 顧客ランク分布:
 ${tierLines || '  データなし'}`
+}
+
+// ---------------------------------------------------------------------------
+// Shopify Products & Pages
+// ---------------------------------------------------------------------------
+
+async function ecGetProducts(channelId: string, input: any): Promise<string> {
+  const storeId = input.store_id
+  const query = input.query ?? ''
+  const limit = input.limit ?? 20
+
+  // Get store credentials
+  let storeQuery = supabase
+    .from('ec_stores')
+    .select('*')
+    .eq('channel_id', channelId)
+    .eq('platform', 'shopify')
+
+  if (storeId) {
+    storeQuery = storeQuery.eq('id', storeId)
+  }
+
+  const { data: stores } = await storeQuery.limit(1).single()
+
+  if (!stores || !stores.shopify_domain || !stores.shopify_access_token) {
+    return 'Shopifyストアが接続されていません。EC管理画面でストアを接続してください。'
+  }
+
+  const domain = stores.shopify_domain
+  const token = stores.shopify_access_token
+
+  // Fetch products from Shopify
+  const searchParam = query ? `&title=${encodeURIComponent(query)}` : ''
+  const res = await fetch(
+    `https://${domain}/admin/api/2024-01/products.json?limit=${limit}${searchParam}`,
+    { headers: { 'X-Shopify-Access-Token': token } }
+  )
+
+  if (!res.ok) {
+    return `Shopify APIエラー: ${res.status} ${res.statusText}`
+  }
+
+  const data = await res.json()
+  const products = data.products ?? []
+
+  if (products.length === 0) {
+    return query ? `「${query}」に一致する商品が見つかりませんでした。` : '商品が見つかりませんでした。'
+  }
+
+  const lines = products.map((p: any) => {
+    const url = `https://${domain}/products/${p.handle}`
+    const price = p.variants?.[0]?.price ?? '不明'
+    const image = p.image?.src ?? '画像なし'
+    return `- **${p.title}** (¥${Number(price).toLocaleString()})
+    URL: ${url}
+    画像: ${image}
+    説明: ${(p.body_html ?? '').replace(/<[^>]+>/g, '').slice(0, 80)}...`
+  })
+
+  return `### Shopify商品一覧（${products.length}件）
+ストア: ${domain}
+
+${lines.join('\n\n')}`
+}
+
+async function ecGetStorePages(channelId: string, input: any): Promise<string> {
+  const storeId = input.store_id
+
+  let storeQuery = supabase
+    .from('ec_stores')
+    .select('*')
+    .eq('channel_id', channelId)
+    .eq('platform', 'shopify')
+
+  if (storeId) {
+    storeQuery = storeQuery.eq('id', storeId)
+  }
+
+  const { data: store } = await storeQuery.limit(1).single()
+
+  if (!store || !store.shopify_domain) {
+    return 'Shopifyストアが接続されていません。'
+  }
+
+  const domain = store.shopify_domain
+  const token = store.shopify_access_token
+
+  // Fetch collections
+  let collections: any[] = []
+  try {
+    const colRes = await fetch(
+      `https://${domain}/admin/api/2024-01/custom_collections.json?limit=20`,
+      { headers: { 'X-Shopify-Access-Token': token } }
+    )
+    if (colRes.ok) {
+      const colData = await colRes.json()
+      collections = colData.custom_collections ?? []
+    }
+  } catch {}
+
+  // Fetch pages
+  let pages: any[] = []
+  try {
+    const pageRes = await fetch(
+      `https://${domain}/admin/api/2024-01/pages.json?limit=20`,
+      { headers: { 'X-Shopify-Access-Token': token } }
+    )
+    if (pageRes.ok) {
+      const pageData = await pageRes.json()
+      pages = pageData.pages ?? []
+    }
+  } catch {}
+
+  const baseUrl = `https://${domain}`
+
+  let result = `### ${domain} のページ一覧\n\n`
+  result += `**主要ページ:**\n`
+  result += `- ホーム: ${baseUrl}\n`
+  result += `- 全商品: ${baseUrl}/collections/all\n`
+  result += `- カート: ${baseUrl}/cart\n`
+  result += `- お問い合わせ: ${baseUrl}/pages/contact\n\n`
+
+  if (collections.length > 0) {
+    result += `**コレクション:**\n`
+    for (const col of collections) {
+      result += `- ${col.title}: ${baseUrl}/collections/${col.handle}\n`
+    }
+    result += '\n'
+  }
+
+  if (pages.length > 0) {
+    result += `**固定ページ:**\n`
+    for (const page of pages) {
+      result += `- ${page.title}: ${baseUrl}/pages/${page.handle}\n`
+    }
+  }
+
+  return result
 }

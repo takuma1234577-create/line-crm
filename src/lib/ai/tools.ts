@@ -427,5 +427,29 @@ export const crmTools: any[] = [
         period: { type: "string", enum: ["today", "week", "month", "year"] }
       }
     }
+  },
+
+  // ===== Shopify商品・ページ取得 =====
+  {
+    name: "ec_get_products",
+    description: "Shopifyストアの商品一覧を取得する。商品名、URL、画像URL、価格、説明を含む。リッチメニューのURL設定などに使う。",
+    input_schema: {
+      type: "object",
+      properties: {
+        store_id: { type: "string", description: "ストアID（省略時は最初のShopifyストア）" },
+        query: { type: "string", description: "商品名で検索" },
+        limit: { type: "number", description: "取得件数（デフォルト20）" }
+      }
+    }
+  },
+  {
+    name: "ec_get_store_pages",
+    description: "Shopifyストアの主要ページURL一覧を取得する。ホーム、コレクション、カート、お問い合わせなど。",
+    input_schema: {
+      type: "object",
+      properties: {
+        store_id: { type: "string", description: "ストアID（省略時は最初のShopifyストア）" }
+      }
+    }
   }
 ]
