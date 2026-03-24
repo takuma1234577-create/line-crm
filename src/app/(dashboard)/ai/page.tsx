@@ -103,6 +103,73 @@ function QuickActionIcon({ name }: { name: string }) {
   }
 }
 
+/**
+ * Extract suggested action buttons from AI response text.
+ * Detects patterns like:
+ * - Yes/No questions: いかがですか？/ よろしいですか？/ しますか？
+ * - Lettered options: A) ..., B) ..., C) ...
+ * - Numbered options with descriptions
+ */
+function extractSuggestedActions(text: string): { label: string; message: string }[] {
+  const actions: { label: string; message: string }[] = []
+  const lines = text.split("\n").map((l) => l.trim())
+
+  // Detect yes/no confirmation questions
+  const confirmPatterns = [
+    /いかがですか？/,
+    /よろしいですか？/,
+    /しますか？/,
+    /しましょうか？/,
+    /実行しますか？/,
+    /送信していいですか？/,
+    /どうですか？$/,
+    /いいですか？/,
+  ]
+  const lastLines = lines.slice(-5).join(" ")
+  const hasConfirmQuestion = confirmPatterns.some((p) => p.test(lastLines))
+
+  if (hasConfirmQuestion) {
+    actions.push(
+      { label: "はい、お願いします", message: "はい、お願いします" },
+      { label: "いいえ、やめておきます", message: "いいえ、やめておきます" },
+    )
+  }
+
+  // Detect lettered options: A) ..., B) ..., or A. ..., B. ...
+  const letterOptionRegex = /^([A-Z])[)\.]\s*(.+)/
+  for (const line of lines) {
+    const match = line.match(letterOptionRegex)
+    if (match) {
+      const label = match[2].replace(/\*\*/g, "").trim()
+      // Truncate long labels
+      const shortLabel = label.length > 30 ? label.slice(0, 30) + "…" : label
+      actions.push({ label: `${match[1]}) ${shortLabel}`, message: `${match[1]}でお願いします` })
+    }
+  }
+
+  // Detect numbered options: 1. ..., 2. ..., or 1) ..., 2) ...
+  if (actions.length === 0 || hasConfirmQuestion) {
+    const numberOptionRegex = /^(\d+)[)\.]\s*\**(.+?)\**\s*[—\-:：]/
+    for (const line of lines) {
+      const match = line.match(numberOptionRegex)
+      if (match) {
+        const num = match[1]
+        const label = match[2].replace(/\*\*/g, "").trim()
+        const shortLabel = label.length > 25 ? label.slice(0, 25) + "…" : label
+        actions.push({ label: shortLabel, message: `${num}番の「${label}」でお願いします` })
+      }
+    }
+  }
+
+  // Deduplicate by message
+  const seen = new Set<string>()
+  return actions.filter((a) => {
+    if (seen.has(a.message)) return false
+    seen.add(a.message)
+    return true
+  })
+}
+
 function renderFormattedText(text: string) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
@@ -524,67 +591,93 @@ export default function AIPage() {
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto px-4 py-6">
           <div className="mx-auto max-w-3xl space-y-6">
-            {messages.map((msg) => {
+            {messages.map((msg, msgIndex) => {
               if (msg.role === "system") return null;
 
               const isUser = msg.role === "user";
+              const isLastAssistantMsg =
+                !isUser &&
+                msg.content &&
+                !isLoading &&
+                msgIndex === messages.length - 1;
+              const suggestedActions = isLastAssistantMsg
+                ? extractSuggestedActions(msg.content)
+                : [];
+
               return (
-                <div
-                  key={msg.id}
-                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  <div className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""} max-w-[85%]`}>
-                    {/* Avatar */}
-                    {!isUser && (
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#06C755] to-[#05A649] shadow-sm">
-                        <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-                        </svg>
-                      </div>
-                    )}
-                    
-                    {/* Message bubble */}
-                    <div
-                      className={`rounded-2xl px-4 py-3 ${
-                        isUser
-                          ? "bg-[#06C755] text-white shadow-sm"
-                          : "bg-white text-gray-800 shadow-sm border border-gray-100"
-                      }`}
-                    >
-                      {/* Attachment previews */}
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="mb-2 flex flex-wrap gap-2">
-                          {msg.attachments.map((att) =>
-                            att.previewUrl ? (
-                              <img
-                                key={att.id}
-                                src={att.previewUrl}
-                                alt={att.name}
-                                className="max-h-48 max-w-full rounded-lg object-contain"
-                              />
-                            ) : (
-                              <div
-                                key={att.id}
-                                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
-                                  isUser ? "bg-white/20" : "bg-gray-100"
-                                }`}
-                              >
-                                <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                                </svg>
-                                <span className="truncate max-w-[120px]">{att.name}</span>
-                              </div>
-                            )
-                          )}
+                <div key={msg.id}>
+                  <div
+                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                  >
+                    <div className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""} max-w-[85%]`}>
+                      {/* Avatar */}
+                      {!isUser && (
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#06C755] to-[#05A649] shadow-sm">
+                          <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                          </svg>
                         </div>
                       )}
-                      {isUser ? (
-                        msg.content ? <p className="whitespace-pre-wrap text-sm">{msg.content}</p> : null
-                      ) : msg.content ? (
-                        <div className="space-y-1">{renderFormattedText(msg.content)}</div>
-                      ) : null}
+
+                      {/* Message bubble */}
+                      <div
+                        className={`rounded-2xl px-4 py-3 ${
+                          isUser
+                            ? "bg-[#06C755] text-white shadow-sm"
+                            : "bg-white text-gray-800 shadow-sm border border-gray-100"
+                        }`}
+                      >
+                        {/* Attachment previews */}
+                        {msg.attachments && msg.attachments.length > 0 && (
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            {msg.attachments.map((att) =>
+                              att.previewUrl ? (
+                                <img
+                                  key={att.id}
+                                  src={att.previewUrl}
+                                  alt={att.name}
+                                  className="max-h-48 max-w-full rounded-lg object-contain"
+                                />
+                              ) : (
+                                <div
+                                  key={att.id}
+                                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs ${
+                                    isUser ? "bg-white/20" : "bg-gray-100"
+                                  }`}
+                                >
+                                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                  </svg>
+                                  <span className="truncate max-w-[120px]">{att.name}</span>
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
+                        {isUser ? (
+                          msg.content ? <p className="whitespace-pre-wrap text-sm">{msg.content}</p> : null
+                        ) : msg.content ? (
+                          <div className="space-y-1">{renderFormattedText(msg.content)}</div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
+
+                  {/* Suggested action buttons */}
+                  {suggestedActions.length > 0 && (
+                    <div className="mt-3 ml-13 flex flex-wrap gap-2 pl-[52px]">
+                      {suggestedActions.map((action, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSend(action.message)}
+                          disabled={isLoading}
+                          className="rounded-full border border-[#06C755]/30 bg-[#06C755]/5 px-4 py-2 text-sm font-medium text-[#06C755] transition-all hover:border-[#06C755] hover:bg-[#06C755]/10 hover:shadow-sm active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
