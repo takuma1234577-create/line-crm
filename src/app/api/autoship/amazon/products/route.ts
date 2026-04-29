@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { getAccessToken, getInventorySummaries, getCatalogItem } from '@/lib/amazon/sp-api'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function GET(request: NextRequest) {
   const spAccountId = request.nextUrl.searchParams.get('sp_account_id')
@@ -13,7 +19,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'sp_account_id is required' }, { status: 400 })
   }
 
-  const { data } = await supabase
+  const { data } = await getSupabase()
     .from('amazon_products')
     .select('*')
     .eq('sp_account_id', spAccountId)
@@ -25,7 +31,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const { sp_account_id } = await request.json()
 
-  const { data: account } = await supabase
+  const { data: account } = await getSupabase()
     .from('amazon_sp_accounts')
     .select('*')
     .eq('id', sp_account_id)
@@ -64,7 +70,7 @@ export async function POST(request: NextRequest) {
       const details = item.inventoryDetails || {}
       const reserved = details.reservedQuantity?.totalReservedQuantity ?? 0
 
-      await supabase.from('amazon_products').upsert(
+      await getSupabase().from('amazon_products').upsert(
         {
           sp_account_id,
           asin: item.asin,
@@ -86,7 +92,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Update account last sync time
-    await supabase
+    await getSupabase()
       .from('amazon_sp_accounts')
       .update({ last_synced_at: new Date().toISOString() })
       .eq('id', sp_account_id)

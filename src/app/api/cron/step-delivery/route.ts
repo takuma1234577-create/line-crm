@@ -1,15 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { messagingApi } from '@line/bot-sdk'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 const BATCH_SIZE = 50
 
@@ -27,7 +39,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Fetch active enrollments that are due
-    const { data: enrollments, error: fetchError } = await supabase
+    const { data: enrollments, error: fetchError } = await getSupabase()
       .from('step_enrollments')
       .select('id, sequence_id, friend_id, current_step')
       .eq('status', 'active')
@@ -48,7 +60,7 @@ export async function GET(request: NextRequest) {
     for (const enrollment of enrollments) {
       try {
         // Get the step message for the current step
-        const { data: stepMessages, error: stepError } = await supabase
+        const { data: stepMessages, error: stepError } = await getSupabase()
           .from('step_messages')
           .select('*')
           .eq('sequence_id', enrollment.sequence_id)
@@ -65,7 +77,7 @@ export async function GET(request: NextRequest) {
 
         if (!currentMessage) {
           // No message at this step index - mark as completed
-          await supabase
+          await getSupabase()
             .from('step_enrollments')
             .update({ status: 'completed', completed_at: now })
             .eq('id', enrollment.id)
@@ -74,7 +86,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Get the friend's line_user_id
-        const { data: friend, error: friendError } = await supabase
+        const { data: friend, error: friendError } = await getSupabase()
           .from('friends')
           .select('line_user_id')
           .eq('id', enrollment.friend_id)
@@ -92,7 +104,7 @@ export async function GET(request: NextRequest) {
           : [{ type: 'text', text: String(currentMessage.content) }]
 
         // Send via LINE push message
-        await lineClient.pushMessage({
+        await getLineClient().pushMessage({
           to: friend.line_user_id,
           messages,
         })
@@ -106,7 +118,7 @@ export async function GET(request: NextRequest) {
           const delayMinutes = nextMessage.delay_minutes ?? 0
           const nextSendAt = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString()
 
-          await supabase
+          await getSupabase()
             .from('step_enrollments')
             .update({
               current_step: nextStepIndex,
@@ -116,7 +128,7 @@ export async function GET(request: NextRequest) {
             .eq('id', enrollment.id)
         } else {
           // No more steps - mark as completed
-          await supabase
+          await getSupabase()
             .from('step_enrollments')
             .update({
               status: 'completed',

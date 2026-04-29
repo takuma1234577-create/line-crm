@@ -3,9 +3,15 @@ import { messagingApi } from '@line/bot-sdk'
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 export async function POST(request: Request) {
   try {
@@ -79,7 +85,7 @@ export async function POST(request: Request) {
     for (let i = 0; i < friendLineUserIds.length; i += batchSize) {
       const batch = friendLineUserIds.slice(i, i + batchSize)
       try {
-        await lineClient.multicast({
+        await getLineClient().multicast({
           to: batch,
           messages: [{ type: 'text', text: message }],
         })

@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { getAccessToken, getInventorySummaries, getFulfillmentOrder } from '@/lib/amazon/sp-api'
 import * as tiktokShop from '@/lib/tiktok/shop'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function GET() {
   const results: Record<string, any> = {}
@@ -36,7 +42,7 @@ export async function GET() {
 
 // Step 1: Sync Amazon FBA inventory
 async function syncAmazonInventory() {
-  const { data: accounts } = await supabase
+  const { data: accounts } = await getSupabase()
     .from('amazon_sp_accounts')
     .select('*')
     .eq('is_active', true)
@@ -55,7 +61,7 @@ async function syncAmazonInventory() {
 
       for (const item of summaries) {
         const details = item.inventoryDetails || {}
-        await supabase.from('amazon_products').upsert(
+        await getSupabase().from('amazon_products').upsert(
           {
             sp_account_id: account.id,
             asin: item.asin,
@@ -72,7 +78,7 @@ async function syncAmazonInventory() {
         totalSynced++
       }
 
-      await supabase.from('amazon_sp_accounts').update({ last_synced_at: new Date().toISOString() }).eq('id', account.id)
+      await getSupabase().from('amazon_sp_accounts').update({ last_synced_at: new Date().toISOString() }).eq('id', account.id)
     } catch (err: any) {
       console.error(`[autoship-sync] inventory error for ${account.account_name}:`, err.message)
     }
@@ -83,7 +89,7 @@ async function syncAmazonInventory() {
 
 // Step 2: Sync orders from Shopify/TikTok
 async function syncChannelOrders() {
-  const { data: stores } = await supabase
+  const { data: stores } = await getSupabase()
     .from('channel_stores')
     .select('*')
     .eq('is_active', true)
@@ -118,7 +124,7 @@ async function syncShopifyOrders(store: any): Promise<number> {
 
   for (const order of orders ?? []) {
     // Check if order items have ASIN mappings
-    const { error } = await supabase.from('autoship_orders').upsert(
+    const { error } = await getSupabase().from('autoship_orders').upsert(
       {
         store_id: store.id,
         external_order_id: String(order.id),
@@ -139,7 +145,7 @@ async function syncShopifyOrders(store: any): Promise<number> {
 
     if (!error) {
       // Upsert order items with ASIN from channel_products mapping
-      const { data: ecOrder } = await supabase
+      const { data: ecOrder } = await getSupabase()
         .from('autoship_orders')
         .select('id')
         .eq('store_id', store.id)
@@ -149,14 +155,14 @@ async function syncShopifyOrders(store: any): Promise<number> {
       if (ecOrder) {
         for (const item of order.line_items ?? []) {
           // Look up ASIN from channel_products mapping
-          const { data: channelProduct } = await supabase
+          const { data: channelProduct } = await getSupabase()
             .from('channel_products')
             .select('amazon_asin')
             .eq('store_id', store.id)
             .eq('channel_sku', item.sku)
             .single()
 
-          await supabase.from('autoship_order_items').upsert(
+          await getSupabase().from('autoship_order_items').upsert(
             {
               order_id: ecOrder.id,
               external_product_id: String(item.product_id),
@@ -176,7 +182,7 @@ async function syncShopifyOrders(store: any): Promise<number> {
     }
   }
 
-  await supabase.from('channel_stores').update({ last_synced_at: new Date().toISOString() }).eq('id', store.id)
+  await getSupabase().from('channel_stores').update({ last_synced_at: new Date().toISOString() }).eq('id', store.id)
   return synced
 }
 
@@ -202,7 +208,7 @@ async function syncTikTokOrders(store: any): Promise<number> {
 
     const addr = detail.recipient_address || {}
 
-    await supabase.from('autoship_orders').upsert(
+    await getSupabase().from('autoship_orders').upsert(
       {
         store_id: store.id,
         external_order_id: order.order_id,
@@ -221,7 +227,7 @@ async function syncTikTokOrders(store: any): Promise<number> {
     )
 
     // Upsert items
-    const { data: ecOrder } = await supabase
+    const { data: ecOrder } = await getSupabase()
       .from('autoship_orders')
       .select('id')
       .eq('store_id', store.id)
@@ -230,14 +236,14 @@ async function syncTikTokOrders(store: any): Promise<number> {
 
     if (ecOrder) {
       for (const item of detail.item_list ?? []) {
-        const { data: channelProduct } = await supabase
+        const { data: channelProduct } = await getSupabase()
           .from('channel_products')
           .select('amazon_asin')
           .eq('store_id', store.id)
           .eq('channel_sku', item.seller_sku)
           .single()
 
-        await supabase.from('autoship_order_items').upsert(
+        await getSupabase().from('autoship_order_items').upsert(
           {
             order_id: ecOrder.id,
             external_product_id: item.product_id,
@@ -256,13 +262,13 @@ async function syncTikTokOrders(store: any): Promise<number> {
     synced++
   }
 
-  await supabase.from('channel_stores').update({ last_synced_at: new Date().toISOString() }).eq('id', store.id)
+  await getSupabase().from('channel_stores').update({ last_synced_at: new Date().toISOString() }).eq('id', store.id)
   return synced
 }
 
 // Step 3: Auto-fulfill confirmed orders
 async function autoFulfillOrders() {
-  const { data: orders } = await supabase
+  const { data: orders } = await getSupabase()
     .from('autoship_orders')
     .select('*, autoship_order_items(*)')
     .eq('order_status', 'confirmed')
@@ -296,7 +302,7 @@ async function autoFulfillOrders() {
 
 // Step 4: Sync inventory to channels
 async function syncInventoryToChannels() {
-  const { data: products } = await supabase
+  const { data: products } = await getSupabase()
     .from('channel_products')
     .select('*, amazon_products(fulfillable_qty)')
     .eq('sync_inventory', true)
@@ -309,15 +315,15 @@ async function syncInventoryToChannels() {
     if (product.current_stock === fbaStock) continue
 
     try {
-      const store = await supabase.from('channel_stores').select('*').eq('id', product.store_id).single()
+      const store = await getSupabase().from('channel_stores').select('*').eq('id', product.store_id).single()
       if (!store.data) continue
 
       if (store.data.channel === 'shopify') {
         // Simplified - actual implementation in inventory-sync route
-        await supabase.from('channel_products').update({ current_stock: fbaStock, last_inventory_sync: new Date().toISOString() }).eq('id', product.id)
+        await getSupabase().from('channel_products').update({ current_stock: fbaStock, last_inventory_sync: new Date().toISOString() }).eq('id', product.id)
       }
 
-      await supabase.from('inventory_sync_logs').insert({
+      await getSupabase().from('inventory_sync_logs').insert({
         channel_product_id: product.id,
         amazon_product_id: product.amazon_product_id,
         previous_stock: product.current_stock,
@@ -336,14 +342,14 @@ async function syncInventoryToChannels() {
 
 // Step 5: Check MCF fulfillment status and update tracking
 async function updateTrackingInfo() {
-  const { data: pendingOrders } = await supabase
+  const { data: pendingOrders } = await getSupabase()
     .from('autoship_orders')
     .select('*')
     .not('mcf_fulfillment_id', 'is', null)
     .in('mcf_status', ['submitted', 'processing'])
     .limit(50)
 
-  const { data: spAccount } = await supabase
+  const { data: spAccount } = await getSupabase()
     .from('amazon_sp_accounts')
     .select('*')
     .eq('is_active', true)
@@ -384,15 +390,15 @@ async function updateTrackingInfo() {
             updateData.shipped_at = new Date().toISOString()
 
             // Update tracking on the channel platform
-            const store = await supabase.from('channel_stores').select('*').eq('id', order.store_id).single()
+            const store = await getSupabase().from('channel_stores').select('*').eq('id', order.store_id).single()
             if (store.data && trackingNumber) {
               await updateChannelTracking(store.data, order, trackingNumber, carrier || '')
             }
           }
 
-          await supabase.from('autoship_orders').update(updateData).eq('id', order.id)
+          await getSupabase().from('autoship_orders').update(updateData).eq('id', order.id)
 
-          await supabase.from('fulfillment_logs').insert({
+          await getSupabase().from('fulfillment_logs').insert({
             autoship_order_id: order.id,
             event: trackingNumber ? 'tracking_updated' : 'processing',
             message: trackingNumber

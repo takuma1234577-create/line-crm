@@ -3,9 +3,15 @@ import { messagingApi } from '@line/bot-sdk'
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 export async function POST(request: Request) {
   try {
@@ -40,7 +46,7 @@ export async function POST(request: Request) {
 
     // Send via LINE push message
     try {
-      await lineClient.pushMessage({
+      await getLineClient().pushMessage({
         to: friend.line_user_id,
         messages: [{ type: 'text', text: message }],
       })

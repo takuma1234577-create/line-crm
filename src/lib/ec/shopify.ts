@@ -1,9 +1,15 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
@@ -30,7 +36,7 @@ export async function syncShopifyOrders(storeId: string, domain: string, accessT
 
   try {
     // Get last sync time
-    const { data: store } = await supabase
+    const { data: store } = await getSupabase()
       .from('ec_stores')
       .select('last_synced_at')
       .eq('id', storeId)
@@ -57,7 +63,7 @@ export async function syncShopifyOrders(storeId: string, domain: string, accessT
     for (const order of orders) {
       try {
         // Upsert order
-        const { data: ecOrder, error: orderError } = await supabase
+        const { data: ecOrder, error: orderError } = await getSupabase()
           .from('ec_orders')
           .upsert(
             {
@@ -95,7 +101,7 @@ export async function syncShopifyOrders(storeId: string, domain: string, accessT
         // Upsert order items
         if (ecOrder) {
           for (const item of order.line_items) {
-            await supabase.from('ec_order_items').upsert(
+            await getSupabase().from('ec_order_items').upsert(
               {
                 order_id: ecOrder.id,
                 external_product_id: String(item.product_id),
@@ -123,7 +129,7 @@ export async function syncShopifyOrders(storeId: string, domain: string, accessT
     }
 
     // Update last_synced_at
-    await supabase
+    await getSupabase()
       .from('ec_stores')
       .update({ last_synced_at: new Date().toISOString() })
       .eq('id', storeId)
@@ -150,7 +156,7 @@ async function linkOrderToFriend(orderId: string, email: string, phone: string, 
   let friendId: string | null = null
 
   if (email) {
-    const { data: link } = await supabase
+    const { data: link } = await getSupabase()
       .from('ec_customer_links')
       .select('friend_id')
       .eq('customer_email', email)
@@ -161,7 +167,7 @@ async function linkOrderToFriend(orderId: string, email: string, phone: string, 
   }
 
   if (!friendId && phone) {
-    const { data: link } = await supabase
+    const { data: link } = await getSupabase()
       .from('ec_customer_links')
       .select('friend_id')
       .eq('customer_phone', phone)
@@ -172,7 +178,7 @@ async function linkOrderToFriend(orderId: string, email: string, phone: string, 
   }
 
   if (friendId) {
-    await supabase
+    await getSupabase()
       .from('ec_orders')
       .update({ friend_id: friendId })
       .eq('id', orderId)

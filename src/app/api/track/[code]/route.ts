@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function GET(
   request: NextRequest,
@@ -14,7 +20,7 @@ export async function GET(
 
   try {
     // Look up the tracked URL by short code
-    const { data: trackedUrl, error } = await supabase
+    const { data: trackedUrl, error } = await getSupabase()
       .from('tracked_urls')
       .select('id, original_url')
       .eq('short_code', code)
@@ -34,7 +40,7 @@ export async function GET(
     let friendId: string | null = null
 
     if (uid) {
-      const { data: friend } = await supabase
+      const { data: friend } = await getSupabase()
         .from('friends')
         .select('id')
         .eq('line_user_id', uid)
@@ -44,7 +50,7 @@ export async function GET(
     }
 
     // Record the click (non-blocking - don't wait for insert)
-    supabase
+    getSupabase()
       .from('url_clicks')
       .insert({
         tracked_url_id: trackedUrl.id,

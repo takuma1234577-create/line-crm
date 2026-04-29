@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function GET() {
-  const { data } = await supabase
+  const { data } = await getSupabase()
     .from('channel_stores')
     .select('*')
     .order('created_at', { ascending: false })
@@ -44,7 +50,7 @@ export async function POST(request: NextRequest) {
     insertData.tiktok_access_token = access_token || null
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('channel_stores')
     .insert(insertData)
     .select()

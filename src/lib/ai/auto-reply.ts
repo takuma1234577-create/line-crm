@@ -1,10 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { getRelevantKnowledgeChunks, formatKnowledgeChunks, type KnowledgeChunk } from './fitpeak-rag'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 interface AISettings {
   auto_reply_enabled: boolean
@@ -29,7 +36,7 @@ interface KnowledgeItem {
 
 // Check if AI auto-reply is enabled and within active hours
 export async function shouldAutoReply(channelId: string): Promise<AISettings | null> {
-  const { data: settings } = await supabase
+  const { data: settings } = await getSupabase()
     .from('ai_settings')
     .select('*')
     .eq('channel_id', channelId)
@@ -58,7 +65,7 @@ export function shouldEscalate(message: string, keywords: string[]): boolean {
 
 // Fetch all active knowledge base items for the channel
 async function getKnowledgeBase(channelId: string): Promise<KnowledgeItem[]> {
-  const { data } = await supabase
+  const { data } = await getSupabase()
     .from('knowledge_base')
     .select('category, title, content')
     .eq('channel_id', channelId)
@@ -70,7 +77,7 @@ async function getKnowledgeBase(channelId: string): Promise<KnowledgeItem[]> {
 
 // Get or create conversation context (recent message history for this user)
 async function getConversationContext(channelId: string, friendId: string): Promise<{ role: string; content: string }[]> {
-  const { data } = await supabase
+  const { data } = await getSupabase()
     .from('conversation_contexts')
     .select('messages')
     .eq('channel_id', channelId)
@@ -89,7 +96,7 @@ async function updateConversationContext(
   // Keep only last 20 messages to limit context
   const trimmed = messages.slice(-20)
 
-  await supabase
+  await getSupabase()
     .from('conversation_contexts')
     .upsert(
       {
@@ -103,7 +110,12 @@ async function updateConversationContext(
 }
 
 // Build system prompt from settings and knowledge base
-function buildSystemPrompt(settings: AISettings, knowledge: KnowledgeItem[], friendName: string): string {
+function buildSystemPrompt(
+  settings: AISettings,
+  knowledge: KnowledgeItem[],
+  friendName: string,
+  ragChunks: KnowledgeChunk[] = [],
+): string {
   let prompt = `あなたはLINE公式アカウントの自動応答AIです。\n\n`
 
   // Persona
@@ -129,7 +141,7 @@ function buildSystemPrompt(settings: AISettings, knowledge: KnowledgeItem[], fri
   }
 
   // Knowledge base
-  if (knowledge.length > 0) {
+  if (knowledge.length > 0 || ragChunks.length > 0) {
     prompt += `# ナレッジベース（あなたが持つ情報）\n以下の情報を元に回答してください。ナレッジベースにない情報は「確認いたしますので少々お待ちください」と答えてください。\n\n`
 
     const categories = [...new Set(knowledge.map(k => k.category))]
@@ -139,6 +151,11 @@ function buildSystemPrompt(settings: AISettings, knowledge: KnowledgeItem[], fri
       for (const item of items) {
         prompt += `### ${item.title}\n${item.content}\n\n`
       }
+    }
+
+    // RAG で取得した関連ナレッジ（Shopify商品など）
+    if (ragChunks.length > 0) {
+      prompt += `## 関連する商品・ナレッジ（ユーザーの質問との関連度順）\n${formatKnowledgeChunks(ragChunks)}\n\n`
     }
   }
 
@@ -180,14 +197,15 @@ export async function generateAutoReply(
     }
   }
 
-  // Get knowledge base and conversation context
-  const [knowledge, conversationHistory] = await Promise.all([
+  // Get knowledge base, conversation context, and RAG-retrieved chunks
+  const [knowledge, conversationHistory, ragChunks] = await Promise.all([
     getKnowledgeBase(channelId),
     getConversationContext(channelId, friendId),
+    getRelevantKnowledgeChunks(userMessage, { limit: 5 }),
   ])
 
   // Build system prompt
-  const systemPrompt = buildSystemPrompt(settings, knowledge, friendName)
+  const systemPrompt = buildSystemPrompt(settings, knowledge, friendName, ragChunks)
 
   // Build messages array with conversation history
   const messages: { role: 'user' | 'assistant'; content: string }[] = [
@@ -223,7 +241,7 @@ export async function generateAutoReply(
   ])
 
   // Log the reply
-  await supabase.from('ai_reply_logs').insert({
+  await getSupabase().from('ai_reply_logs').insert({
     channel_id: channelId,
     friend_id: friendId,
     user_message: userMessage,

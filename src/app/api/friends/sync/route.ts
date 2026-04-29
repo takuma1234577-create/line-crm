@@ -1,15 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { messagingApi } from '@line/bot-sdk'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
@@ -28,7 +40,7 @@ export async function POST(request: NextRequest) {
     let nextToken: string | undefined = undefined
 
     do {
-      const response = await lineClient.getFollowers(nextToken, 1000)
+      const response = await getLineClient().getFollowers(nextToken, 1000)
 
       const userIds: string[] = response.userIds ?? []
       allUserIds.push(...userIds)
@@ -40,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get existing friends to avoid unnecessary profile API calls
-    const { data: existingFriends } = await supabase
+    const { data: existingFriends } = await getSupabase()
       .from('friends')
       .select('line_user_id')
       .eq('channel_id', CHANNEL_ID)
@@ -64,7 +76,7 @@ export async function POST(request: NextRequest) {
           let pictureUrl: string | null = null
 
           try {
-            const profile = await lineClient.getProfile(lineUserId)
+            const profile = await getLineClient().getProfile(lineUserId)
             displayName = profile.displayName
             pictureUrl = profile.pictureUrl ?? null
           } catch (err) {
@@ -72,7 +84,7 @@ export async function POST(request: NextRequest) {
             console.warn(`[sync] getProfile failed for ${lineUserId}:`, err)
           }
 
-          const { error } = await supabase.from('friends').upsert(
+          const { error } = await getSupabase().from('friends').upsert(
             {
               channel_id: CHANNEL_ID,
               line_user_id: lineUserId,

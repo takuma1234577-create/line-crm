@@ -1,15 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { messagingApi } from '@line/bot-sdk'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 export async function GET(request: NextRequest) {
   // Verify cron secret
@@ -24,7 +36,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Fetch scheduled reminders that are due
-    const { data: reminders, error: fetchError } = await supabase
+    const { data: reminders, error: fetchError } = await getSupabase()
       .from('reminders')
       .select('*')
       .eq('status', 'scheduled')
@@ -52,7 +64,7 @@ export async function GET(request: NextRequest) {
         switch (reminder.target_type) {
           case 'all': {
             // Get all active friends
-            const { data: friends, error } = await supabase
+            const { data: friends, error } = await getSupabase()
               .from('friends')
               .select('line_user_id')
               .eq('status', 'active')
@@ -68,7 +80,7 @@ export async function GET(request: NextRequest) {
 
           case 'tag': {
             // Get friends with specific tag
-            const { data: taggedFriends, error } = await supabase
+            const { data: taggedFriends, error } = await getSupabase()
               .from('friend_tags')
               .select('friend:friends(line_user_id)')
               .eq('tag_id', reminder.target_id)
@@ -90,7 +102,7 @@ export async function GET(request: NextRequest) {
               : []
 
             if (friendIds.length > 0) {
-              const { data: friends, error } = await supabase
+              const { data: friends, error } = await getSupabase()
                 .from('friends')
                 .select('line_user_id')
                 .in('id', friendIds)
@@ -106,7 +118,7 @@ export async function GET(request: NextRequest) {
 
           case 'reservation': {
             // Get friends from a specific reservation slot
-            const { data: reservations, error } = await supabase
+            const { data: reservations, error } = await getSupabase()
               .from('reservations')
               .select('friend:friends(line_user_id)')
               .eq('slot_id', reminder.target_id)
@@ -130,7 +142,7 @@ export async function GET(request: NextRequest) {
         if (lineUserIds.length === 0) {
           console.warn(`[reminders] no recipients for reminder ${reminder.id}`)
           // Still mark as sent to avoid re-processing
-          await supabase
+          await getSupabase()
             .from('reminders')
             .update({ status: 'sent', sent_at: now })
             .eq('id', reminder.id)
@@ -145,14 +157,14 @@ export async function GET(request: NextRequest) {
         }
 
         for (const chunk of chunks) {
-          await lineClient.multicast({
+          await getLineClient().multicast({
             to: chunk,
             messages,
           })
         }
 
         // Update reminder status
-        await supabase
+        await getSupabase()
           .from('reminders')
           .update({
             status: 'sent',
@@ -170,7 +182,7 @@ export async function GET(request: NextRequest) {
         failed++
 
         // Mark as failed to avoid infinite retries
-        await supabase
+        await getSupabase()
           .from('reminders')
           .update({ status: 'failed', error_message: String(err) })
           .eq('id', reminder.id)

@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { getAccessToken, createFulfillmentOrder } from '@/lib/amazon/sp-api'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function GET() {
-  const { data } = await supabase
+  const { data } = await getSupabase()
     .from('fulfillment_logs')
     .select('*')
     .order('created_at', { ascending: false })
@@ -21,7 +27,7 @@ export async function POST(request: NextRequest) {
   const { order_id } = await request.json()
 
   // Get the order with items
-  const { data: order } = await supabase
+  const { data: order } = await getSupabase()
     .from('autoship_orders')
     .select('*, autoship_order_items(*)')
     .eq('id', order_id)
@@ -38,7 +44,7 @@ export async function POST(request: NextRequest) {
   for (const item of items) {
     if (item.asin) {
       // Look up the amazon_product to get seller_sku
-      const { data: amazonProduct } = await supabase
+      const { data: amazonProduct } = await getSupabase()
         .from('amazon_products')
         .select('seller_sku')
         .eq('asin', item.asin)
@@ -60,7 +66,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Get the first active Amazon SP account
-  const { data: spAccount } = await supabase
+  const { data: spAccount } = await getSupabase()
     .from('amazon_sp_accounts')
     .select('*')
     .eq('is_active', true)
@@ -107,7 +113,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Update order with MCF info
-    await supabase
+    await getSupabase()
       .from('autoship_orders')
       .update({
         mcf_fulfillment_id: mcfOrderId,
@@ -118,7 +124,7 @@ export async function POST(request: NextRequest) {
       .eq('id', order_id)
 
     // Log the fulfillment
-    await supabase.from('fulfillment_logs').insert({
+    await getSupabase().from('fulfillment_logs').insert({
       autoship_order_id: order_id,
       event: 'mcf_created',
       message: `MCF配送を作成: ${mcfOrderId} (${fulfillableItems.length}商品)`,
@@ -129,7 +135,7 @@ export async function POST(request: NextRequest) {
 
   } catch (err: any) {
     // Log the error
-    await supabase.from('fulfillment_logs').insert({
+    await getSupabase().from('fulfillment_logs').insert({
       autoship_order_id: order_id,
       event: 'error',
       message: `MCF配送作成エラー: ${err.message}`,

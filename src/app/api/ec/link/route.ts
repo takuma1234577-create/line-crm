@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function POST(request: NextRequest) {
   const { friendId, storeId, email, phone, customerName } = await request.json()
@@ -16,7 +22,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Create/update customer link
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('ec_customer_links')
     .upsert(
       {
@@ -39,7 +45,7 @@ export async function POST(request: NextRequest) {
 
   // Link existing orders by email/phone
   if (email) {
-    await supabase
+    await getSupabase()
       .from('ec_orders')
       .update({ friend_id: friendId })
       .eq('store_id', storeId)
@@ -48,7 +54,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (phone) {
-    await supabase
+    await getSupabase()
       .from('ec_orders')
       .update({ friend_id: friendId })
       .eq('store_id', storeId)
@@ -57,7 +63,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Recalculate customer stats
-  const { data: orderStats } = await supabase
+  const { data: orderStats } = await getSupabase()
     .from('ec_orders')
     .select('id, total_amount, ordered_at')
     .eq('friend_id', friendId)
@@ -74,7 +80,7 @@ export async function POST(request: NextRequest) {
     if (totalOrders >= 5 || totalSpent >= 50000) tier = 'vip'
     else if (totalOrders >= 2) tier = 'repeat'
 
-    await supabase
+    await getSupabase()
       .from('ec_customer_links')
       .update({
         total_orders: totalOrders,

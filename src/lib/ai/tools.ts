@@ -145,7 +145,7 @@ export const crmTools: any[] = [
   // ===== 自動応答 =====
   {
     name: "manage_auto_response",
-    description: "キーワード自動応答ルールの作成・編集・削除・一覧取得。",
+    description: "キーワード自動応答ルールの作成・編集・削除・一覧取得。1つのルールに複数のキーワード（配列）を設定できる。同じ応答メッセージを返す複数キーワードは1つのルールにまとめること（例: 10個の当選番号が同じ賞品なら、keywords配列に10個全部入れて1回のcreateで作成する）。",
     input_schema: {
       type: "object",
       properties: {
@@ -153,8 +153,9 @@ export const crmTools: any[] = [
         rule_id: { type: "string" },
         name: { type: "string", description: "ルール名" },
         match_type: { type: "string", enum: ["exact", "contains", "starts_with", "regex"] },
-        keywords: { type: "array", items: { type: "string" } },
-        response_message: { type: "string", description: "応答メッセージ" },
+        keywords: { type: "array", items: { type: "string" }, description: "マッチするキーワードの配列。同じ応答の場合は1つのルールに全キーワードをまとめる" },
+        response_message: { type: "string", description: "応答テキストメッセージ" },
+        response_image_url: { type: "string", description: "応答に含める画像のURL。アップロード済み画像のURLを指定すると、テキストと一緒に画像も送信される" },
         is_active: { type: "boolean" }
       },
       required: ["action"]

@@ -1,15 +1,27 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { messagingApi } from '@line/bot-sdk'
 import { sub, startOfDay, startOfWeek, startOfMonth, startOfYear } from 'date-fns'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
@@ -100,7 +112,7 @@ export async function executeToolCall(
 
 async function resolveFriend(channelId: string, input: { friend_id?: string; friend_name?: string }): Promise<any | null> {
   if (input.friend_id) {
-    const { data } = await supabase
+    const { data } = await getSupabase()
       .from('friends')
       .select('id, display_name, line_user_id, status, picture_url')
       .eq('channel_id', channelId)
@@ -109,7 +121,7 @@ async function resolveFriend(channelId: string, input: { friend_id?: string; fri
     return data
   }
   if (input.friend_name) {
-    const { data } = await supabase
+    const { data } = await getSupabase()
       .from('friends')
       .select('id, display_name, line_user_id, status, picture_url')
       .eq('channel_id', channelId)
@@ -150,7 +162,7 @@ async function getTodaysMessages(channelId: string, input: any): Promise<string>
   const todayStart = startOfDay(new Date()).toISOString()
 
   // Get today's inbound messages with friend info
-  const { data: messages, error } = await supabase
+  const { data: messages, error } = await getSupabase()
     .from('chat_messages')
     .select('id, friend_id, content, message_type, sent_at, friends!inner(id, display_name, picture_url)')
     .eq('channel_id', channelId)
@@ -176,7 +188,7 @@ async function getTodaysMessages(channelId: string, input: any): Promise<string>
 
   // Check which friends have been replied to (have outbound message after their last inbound)
   const friendIds = Array.from(friendMap.keys())
-  const { data: outboundMessages } = await supabase
+  const { data: outboundMessages } = await getSupabase()
     .from('chat_messages')
     .select('friend_id, sent_at')
     .eq('channel_id', channelId)
@@ -229,7 +241,7 @@ async function getConversation(channelId: string, input: any): Promise<string> {
   const friend = await resolveFriend(channelId, input)
   if (!friend) return 'エラー: 友だちが見つかりませんでした。名前またはIDを確認してください。'
 
-  const { data: messages, error } = await supabase
+  const { data: messages, error } = await getSupabase()
     .from('chat_messages')
     .select('direction, content, message_type, sent_at')
     .eq('channel_id', channelId)
@@ -263,7 +275,7 @@ async function replyToFriend(channelId: string, input: any): Promise<string> {
   if (!friend.line_user_id) return 'エラー: この友だちのLINEユーザーIDが不明です。'
 
   try {
-    await lineClient.pushMessage({
+    await getLineClient().pushMessage({
       to: friend.line_user_id,
       messages: [{ type: 'text', text: message }]
     })
@@ -271,7 +283,7 @@ async function replyToFriend(channelId: string, input: any): Promise<string> {
     return `LINE送信エラー: ${err.message}`
   }
 
-  await supabase.from('chat_messages').insert({
+  await getSupabase().from('chat_messages').insert({
     channel_id: channelId,
     friend_id: friend.id,
     direction: 'outbound',
@@ -296,7 +308,7 @@ async function bulkReply(channelId: string, input: any): Promise<string> {
   let failCount = 0
 
   for (const reply of replies) {
-    const { data: friend } = await supabase
+    const { data: friend } = await getSupabase()
       .from('friends')
       .select('id, display_name, line_user_id')
       .eq('channel_id', channelId)
@@ -310,12 +322,12 @@ async function bulkReply(channelId: string, input: any): Promise<string> {
     }
 
     try {
-      await lineClient.pushMessage({
+      await getLineClient().pushMessage({
         to: friend.line_user_id,
         messages: [{ type: 'text', text: reply.message }]
       })
 
-      await supabase.from('chat_messages').insert({
+      await getSupabase().from('chat_messages').insert({
         channel_id: channelId,
         friend_id: friend.id,
         direction: 'outbound',
@@ -345,7 +357,7 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
 
   if (tag_name) {
     // Send to friends with specific tag
-    const { data: tag } = await supabase
+    const { data: tag } = await getSupabase()
       .from('tags')
       .select('id')
       .eq('channel_id', channelId)
@@ -354,7 +366,7 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
 
     if (!tag) return `エラー: タグ「${tag_name}」が見つかりません。`
 
-    const { data: friendTags } = await supabase
+    const { data: friendTags } = await getSupabase()
       .from('friend_tags')
       .select('friend_id')
       .eq('tag_id', tag.id)
@@ -362,7 +374,7 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
     if (!friendTags || friendTags.length === 0) return `タグ「${tag_name}」が付いた友だちがいません。`
 
     const friendIds = friendTags.map((ft: any) => ft.friend_id)
-    const { data: friends } = await supabase
+    const { data: friends } = await getSupabase()
       .from('friends')
       .select('id, line_user_id, display_name')
       .in('id', friendIds)
@@ -377,9 +389,9 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
       for (let i = 0; i < lineUserIds.length; i += 500) {
         const chunk = lineUserIds.slice(i, i + 500)
         if (chunk.length === 1) {
-          await lineClient.pushMessage({ to: chunk[0], messages })
+          await getLineClient().pushMessage({ to: chunk[0], messages })
         } else {
-          await lineClient.multicast({ to: chunk, messages })
+          await getLineClient().multicast({ to: chunk, messages })
         }
       }
     } catch (err: any) {
@@ -395,21 +407,21 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
       content: message,
       sent_at: new Date().toISOString(),
     }))
-    await supabase.from('chat_messages').insert(chatMessages)
+    await getSupabase().from('chat_messages').insert(chatMessages)
 
     return `タグ「${tag_name}」の${friends.length}人に送信しました。\n内容: ${message}`
   }
 
   // Broadcast to all
   try {
-    await lineClient.broadcast({
+    await getLineClient().broadcast({
       messages: [{ type: 'text', text: message }]
     })
   } catch (err: any) {
     return `LINE一斉送信エラー: ${err.message}`
   }
 
-  await supabase.from('broadcasts').insert({
+  await getSupabase().from('broadcasts').insert({
     channel_id: channelId,
     message_type: 'text',
     content: message,
@@ -417,7 +429,7 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
     sent_at: new Date().toISOString(),
   })
 
-  const { count } = await supabase
+  const { count } = await getSupabase()
     .from('friends')
     .select('id', { count: 'exact', head: true })
     .eq('channel_id', channelId)
@@ -433,7 +445,7 @@ async function doBroadcastMessage(channelId: string, input: any): Promise<string
 async function searchFriends(channelId: string, input: any): Promise<string> {
   const { query, tag_name, status, limit = 20 } = input || {}
 
-  let q = supabase
+  let q = getSupabase()
     .from('friends')
     .select('id, display_name, picture_url, status, line_user_id, followed_at, memo')
     .eq('channel_id', channelId)
@@ -451,7 +463,7 @@ async function searchFriends(channelId: string, input: any): Promise<string> {
 
   // Filter by tag if specified
   if (tag_name) {
-    const { data: tag } = await supabase
+    const { data: tag } = await getSupabase()
       .from('tags')
       .select('id')
       .eq('channel_id', channelId)
@@ -460,7 +472,7 @@ async function searchFriends(channelId: string, input: any): Promise<string> {
 
     if (!tag) return `タグ「${tag_name}」が見つかりません。`
 
-    const { data: taggedFriends } = await supabase
+    const { data: taggedFriends } = await getSupabase()
       .from('friend_tags')
       .select('friend_id')
       .eq('tag_id', tag.id)
@@ -488,7 +500,7 @@ async function searchFriends(channelId: string, input: any): Promise<string> {
 async function getFriendCount(channelId: string, input: any): Promise<string> {
   const { status = 'all', since } = input || {}
 
-  let q = supabase
+  let q = getSupabase()
     .from('friends')
     .select('id', { count: 'exact', head: true })
     .eq('channel_id', channelId)
@@ -513,7 +525,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
 
   switch (action) {
     case 'list': {
-      const { data: tags, error } = await supabase
+      const { data: tags, error } = await getSupabase()
         .from('tags')
         .select('id, name, color, created_at')
         .eq('channel_id', channelId)
@@ -524,7 +536,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
 
       const lines: string[] = []
       for (const tag of tags) {
-        const { count } = await supabase
+        const { count } = await getSupabase()
           .from('friend_tags')
           .select('id', { count: 'exact', head: true })
           .eq('tag_id', tag.id)
@@ -538,7 +550,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
     case 'create': {
       if (!tag_name) return 'エラー: タグ名を指定してください。'
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('tags')
         .insert({
           channel_id: channelId,
@@ -558,7 +570,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
     case 'delete': {
       if (!tag_name) return 'エラー: タグ名を指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('tags')
         .delete()
         .eq('channel_id', channelId)
@@ -580,7 +592,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
       }
       if (resolvedIds.length === 0) return 'エラー: 友だちIDまたは名前を指定してください。'
 
-      const { data: tag } = await supabase
+      const { data: tag } = await getSupabase()
         .from('tags')
         .select('id')
         .eq('channel_id', channelId)
@@ -590,7 +602,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
       if (!tag) return `タグ「${tag_name}」が見つかりません。`
 
       const rows = resolvedIds.map((fid: string) => ({ friend_id: fid, tag_id: tag.id }))
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('friend_tags')
         .upsert(rows, { onConflict: 'friend_id,tag_id' })
 
@@ -609,7 +621,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
       }
       if (resolvedIds.length === 0) return 'エラー: 友だちIDまたは名前を指定してください。'
 
-      const { data: tag } = await supabase
+      const { data: tag } = await getSupabase()
         .from('tags')
         .select('id')
         .eq('channel_id', channelId)
@@ -618,7 +630,7 @@ async function manageTags(channelId: string, input: any): Promise<string> {
 
       if (!tag) return `タグ「${tag_name}」が見つかりません。`
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('friend_tags')
         .delete()
         .eq('tag_id', tag.id)
@@ -642,7 +654,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
 
   switch (action) {
     case 'list': {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('step_sequences')
         .select('id, name, trigger_type, is_active, created_at')
         .eq('channel_id', channelId)
@@ -661,7 +673,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
     case 'get': {
       if (!sequence_id) return 'エラー: シーケンスIDを指定してください。'
 
-      const { data: seq, error } = await supabase
+      const { data: seq, error } = await getSupabase()
         .from('step_sequences')
         .select('*')
         .eq('id', sequence_id)
@@ -670,7 +682,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
 
       if (error || !seq) return 'シーケンスが見つかりません。'
 
-      const { data: msgs } = await supabase
+      const { data: msgs } = await getSupabase()
         .from('step_messages')
         .select('*')
         .eq('sequence_id', sequence_id)
@@ -687,7 +699,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
     case 'create': {
       if (!name) return 'エラー: シーケンス名を指定してください。'
 
-      const { data: seq, error } = await supabase
+      const { data: seq, error } = await getSupabase()
         .from('step_sequences')
         .insert({
           channel_id: channelId,
@@ -710,7 +722,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
           content: s.message,
         }))
 
-        const { error: stepError } = await supabase.from('step_messages').insert(stepRows)
+        const { error: stepError } = await getSupabase().from('step_messages').insert(stepRows)
         if (stepError) return `シーケンスは作成されましたが、ステップの追加でエラー: ${stepError.message}`
       }
 
@@ -726,7 +738,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
       if (is_active !== undefined) updates.is_active = is_active
 
       if (Object.keys(updates).length > 0) {
-        const { error } = await supabase
+        const { error } = await getSupabase()
           .from('step_sequences')
           .update(updates)
           .eq('id', sequence_id)
@@ -737,7 +749,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
 
       // Update steps if provided
       if (steps && steps.length > 0) {
-        await supabase.from('step_messages').delete().eq('sequence_id', sequence_id)
+        await getSupabase().from('step_messages').delete().eq('sequence_id', sequence_id)
 
         const stepRows = steps.map((s: any, i: number) => ({
           sequence_id,
@@ -747,7 +759,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
           content: s.message,
         }))
 
-        const { error: stepError } = await supabase.from('step_messages').insert(stepRows)
+        const { error: stepError } = await getSupabase().from('step_messages').insert(stepRows)
         if (stepError) return `シーケンス更新後、ステップの追加でエラー: ${stepError.message}`
       }
 
@@ -757,8 +769,8 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
     case 'delete': {
       if (!sequence_id) return 'エラー: シーケンスIDを指定してください。'
 
-      await supabase.from('step_messages').delete().eq('sequence_id', sequence_id)
-      const { error } = await supabase
+      await getSupabase().from('step_messages').delete().eq('sequence_id', sequence_id)
+      const { error } = await getSupabase()
         .from('step_sequences')
         .delete()
         .eq('id', sequence_id)
@@ -771,7 +783,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
     case 'toggle': {
       if (!sequence_id) return 'エラー: シーケンスIDを指定してください。'
 
-      const { data: seq } = await supabase
+      const { data: seq } = await getSupabase()
         .from('step_sequences')
         .select('is_active, name')
         .eq('id', sequence_id)
@@ -781,7 +793,7 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
       if (!seq) return 'シーケンスが見つかりません。'
 
       const newState = !seq.is_active
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('step_sequences')
         .update({ is_active: newState })
         .eq('id', sequence_id)
@@ -799,14 +811,27 @@ async function manageStepSequence(channelId: string, input: any): Promise<string
 // manage_auto_response
 // ---------------------------------------------------------------------------
 
+function buildResponseMessages(text: string, imageUrl?: string): any[] {
+  const msgs: any[] = []
+  if (imageUrl) {
+    msgs.push({
+      type: 'image',
+      originalContentUrl: imageUrl,
+      previewImageUrl: imageUrl,
+    })
+  }
+  msgs.push({ type: 'text', text })
+  return msgs
+}
+
 async function manageAutoResponse(channelId: string, input: any): Promise<string> {
-  const { action, rule_id, name, match_type, keywords, response_message, is_active } = input
+  const { action, rule_id, name, match_type, keywords, response_message, response_image_url, is_active } = input
 
   switch (action) {
     case 'list': {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('auto_responses')
-        .select('id, name, match_type, keyword, is_active, priority')
+        .select('id, name, match_type, keywords, is_active, priority, response_messages')
         .eq('channel_id', channelId)
         .order('priority', { ascending: true })
 
@@ -815,7 +840,10 @@ async function manageAutoResponse(channelId: string, input: any): Promise<string
 
       const lines = data.map((r: any) => {
         const status = r.is_active ? '🟢有効' : '🔴無効'
-        return `- ${r.name}（${status}）\n  マッチ: ${r.match_type} / キーワード: ${r.keyword} / ID: ${r.id}`
+        const kws = Array.isArray(r.keywords) ? r.keywords.join(', ') : r.keywords
+        const hasImage = Array.isArray(r.response_messages) && r.response_messages.some((b: any) => b.type === 'image')
+        const imageLabel = hasImage ? ' 📸画像あり' : ''
+        return `- ${r.name}（${status}${imageLabel}）\n  マッチ: ${r.match_type} / キーワード: ${kws} / ID: ${r.id}`
       })
       return `自動応答ルール一覧: ${data.length}件\n\n${lines.join('\n')}`
     }
@@ -825,20 +853,50 @@ async function manageAutoResponse(channelId: string, input: any): Promise<string
         return 'エラー: name, match_type, keywords, response_message を指定してください。'
       }
 
-      const rows = keywords.map((keyword: string, i: number) => ({
+      // Check if a rule with the same response_message already exists — merge keywords into it
+      const { data: allRules } = await getSupabase()
+        .from('auto_responses')
+        .select('id, name, keywords, response_messages')
+        .eq('channel_id', channelId)
+        .eq('match_type', match_type)
+
+      const existing = (allRules ?? []).find((r: any) => {
+        if (!Array.isArray(r.response_messages) || r.response_messages.length === 0) return false
+        // Find the text block in response_messages (could be at any position)
+        const textBlock = r.response_messages.find((b: any) => b.type === 'text')
+        return textBlock?.text === response_message
+      })
+
+      if (existing) {
+        const merged = [...new Set([...(existing.keywords ?? []), ...keywords])]
+        const updates: any = { keywords: merged }
+        // If a new image URL is provided, update response_messages with image
+        if (response_image_url) {
+          updates.response_messages = buildResponseMessages(response_message, response_image_url)
+        }
+        const { error } = await getSupabase()
+          .from('auto_responses')
+          .update(updates)
+          .eq('id', existing.id)
+
+        if (error) return `エラー: ${error.message}`
+        return `自動応答ルール「${existing.name}」にキーワード${keywords.length}個を追加しました。（合計: ${merged.length}個）${response_image_url ? ' 画像も設定済み。' : ''}`
+      }
+
+      const row = {
         channel_id: channelId,
-        name: keywords.length > 1 ? `${name} (${i + 1})` : name,
+        name,
         match_type,
-        keyword,
-        response_messages: [{ type: 'text', text: response_message }],
+        keywords,
+        response_messages: buildResponseMessages(response_message, response_image_url),
         is_active: true,
         priority: 100,
-      }))
+      }
 
-      const { data, error } = await supabase.from('auto_responses').insert(rows).select()
+      const { data, error } = await getSupabase().from('auto_responses').insert(row).select()
       if (error) return `エラー: ${error.message}`
 
-      return `自動応答ルール「${name}」を作成しました。（キーワード: ${keywords.join(', ')}、${data?.length || 0}件のルール）`
+      return `自動応答ルール「${name}」を作成しました。（キーワード: ${keywords.length}個）`
     }
 
     case 'update': {
@@ -847,11 +905,25 @@ async function manageAutoResponse(channelId: string, input: any): Promise<string
       const updates: any = {}
       if (name) updates.name = name
       if (match_type) updates.match_type = match_type
-      if (response_message) updates.response_messages = [{ type: 'text', text: response_message }]
       if (is_active !== undefined) updates.is_active = is_active
-      if (keywords && keywords.length > 0) updates.keyword = keywords[0]
+      if (keywords && keywords.length > 0) updates.keywords = keywords
 
-      const { error } = await supabase
+      // Handle response message + image updates
+      if (response_message) {
+        updates.response_messages = buildResponseMessages(response_message, response_image_url)
+      } else if (response_image_url) {
+        // Only image URL provided — load existing text and rebuild
+        const { data: existing } = await getSupabase()
+          .from('auto_responses')
+          .select('response_messages')
+          .eq('id', rule_id)
+          .single()
+        const existingText = existing?.response_messages
+          ?.find((b: any) => b.type === 'text')?.text ?? ''
+        updates.response_messages = buildResponseMessages(existingText, response_image_url)
+      }
+
+      const { error } = await getSupabase()
         .from('auto_responses')
         .update(updates)
         .eq('id', rule_id)
@@ -864,7 +936,7 @@ async function manageAutoResponse(channelId: string, input: any): Promise<string
     case 'delete': {
       if (!rule_id) return 'エラー: ルールIDを指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('auto_responses')
         .delete()
         .eq('id', rule_id)
@@ -877,7 +949,7 @@ async function manageAutoResponse(channelId: string, input: any): Promise<string
     case 'toggle': {
       if (!rule_id) return 'エラー: ルールIDを指定してください。'
 
-      const { data: rule } = await supabase
+      const { data: rule } = await getSupabase()
         .from('auto_responses')
         .select('is_active, name')
         .eq('id', rule_id)
@@ -887,7 +959,7 @@ async function manageAutoResponse(channelId: string, input: any): Promise<string
       if (!rule) return 'ルールが見つかりません。'
 
       const newState = !rule.is_active
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('auto_responses')
         .update({ is_active: newState })
         .eq('id', rule_id)
@@ -910,7 +982,7 @@ async function manageRichMenu(channelId: string, input: any): Promise<string> {
 
   switch (action) {
     case 'list': {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('rich_menus')
         .select('id, name, chat_bar_text, is_default, created_at')
         .eq('channel_id', channelId)
@@ -929,7 +1001,7 @@ async function manageRichMenu(channelId: string, input: any): Promise<string> {
     case 'get': {
       if (!menu_id) return 'エラー: メニューIDを指定してください。'
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('rich_menus')
         .select('*')
         .eq('id', menu_id)
@@ -948,7 +1020,7 @@ async function manageRichMenu(channelId: string, input: any): Promise<string> {
     case 'create': {
       if (!name) return 'エラー: メニュー名を指定してください。'
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('rich_menus')
         .insert({
           channel_id: channelId,
@@ -973,7 +1045,7 @@ async function manageRichMenu(channelId: string, input: any): Promise<string> {
       if (areas) updates.areas = areas
       if (is_default !== undefined) updates.is_default = is_default
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('rich_menus')
         .update(updates)
         .eq('id', menu_id)
@@ -986,7 +1058,7 @@ async function manageRichMenu(channelId: string, input: any): Promise<string> {
     case 'delete': {
       if (!menu_id) return 'エラー: メニューIDを指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('rich_menus')
         .delete()
         .eq('id', menu_id)
@@ -1000,14 +1072,14 @@ async function manageRichMenu(channelId: string, input: any): Promise<string> {
       if (!menu_id) return 'エラー: メニューIDを指定してください。'
 
       // Unset current default
-      await supabase
+      await getSupabase()
         .from('rich_menus')
         .update({ is_default: false })
         .eq('channel_id', channelId)
         .eq('is_default', true)
 
       // Set new default
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('rich_menus')
         .update({ is_default: true })
         .eq('id', menu_id)
@@ -1031,7 +1103,7 @@ async function manageTemplate(channelId: string, input: any): Promise<string> {
 
   switch (action) {
     case 'list': {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('templates')
         .select('id, name, type, created_at')
         .eq('channel_id', channelId)
@@ -1049,7 +1121,7 @@ async function manageTemplate(channelId: string, input: any): Promise<string> {
     case 'create': {
       if (!name || !content) return 'エラー: テンプレート名と内容を指定してください。'
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('templates')
         .insert({
           channel_id: channelId,
@@ -1067,7 +1139,7 @@ async function manageTemplate(channelId: string, input: any): Promise<string> {
     case 'delete': {
       if (!template_id) return 'エラー: テンプレートIDを指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('templates')
         .delete()
         .eq('id', template_id)
@@ -1091,7 +1163,7 @@ async function manageForm(channelId: string, input: any): Promise<string> {
 
   switch (action) {
     case 'list': {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('forms')
         .select('id, title, description, created_at')
         .eq('channel_id', channelId)
@@ -1109,7 +1181,7 @@ async function manageForm(channelId: string, input: any): Promise<string> {
     case 'create': {
       if (!title) return 'エラー: フォームタイトルを指定してください。'
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('forms')
         .insert({
           channel_id: channelId,
@@ -1129,7 +1201,7 @@ async function manageForm(channelId: string, input: any): Promise<string> {
     case 'delete': {
       if (!form_id) return 'エラー: フォームIDを指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('forms')
         .delete()
         .eq('id', form_id)
@@ -1142,13 +1214,13 @@ async function manageForm(channelId: string, input: any): Promise<string> {
     case 'get_submissions': {
       if (!form_id) return 'エラー: フォームIDを指定してください。'
 
-      const { data: form } = await supabase
+      const { data: form } = await getSupabase()
         .from('forms')
         .select('title')
         .eq('id', form_id)
         .single()
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('form_submissions')
         .select('id, friend_id, data, submitted_at, friends(display_name)')
         .eq('form_id', form_id)
@@ -1181,7 +1253,7 @@ async function manageReservation(channelId: string, input: any): Promise<string>
 
   switch (action) {
     case 'list_slots': {
-      let q = supabase
+      let q = getSupabase()
         .from('reservation_slots')
         .select('id, title, date, start_time, end_time, capacity, reserved_count')
         .eq('channel_id', channelId)
@@ -1204,7 +1276,7 @@ async function manageReservation(channelId: string, input: any): Promise<string>
         return 'エラー: title, date, start_time, end_time を指定してください。'
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('reservation_slots')
         .insert({
           channel_id: channelId,
@@ -1223,7 +1295,7 @@ async function manageReservation(channelId: string, input: any): Promise<string>
     }
 
     case 'list_reservations': {
-      let q = supabase
+      let q = getSupabase()
         .from('reservations')
         .select('id, slot_id, friend_id, status, reserved_at, reservation_slots(title, date, start_time, end_time), friends(display_name)')
         .eq('channel_id', channelId)
@@ -1246,13 +1318,13 @@ async function manageReservation(channelId: string, input: any): Promise<string>
     case 'cancel': {
       if (!reservation_id) return 'エラー: 予約IDを指定してください。'
 
-      const { data: reservation } = await supabase
+      const { data: reservation } = await getSupabase()
         .from('reservations')
         .select('slot_id')
         .eq('id', reservation_id)
         .single()
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('reservations')
         .update({ status: 'cancelled' })
         .eq('id', reservation_id)
@@ -1261,13 +1333,13 @@ async function manageReservation(channelId: string, input: any): Promise<string>
 
       // Decrement booked_count
       if (reservation) {
-        const { data: slot } = await supabase
+        const { data: slot } = await getSupabase()
           .from('reservation_slots')
           .select('booked_count')
           .eq('id', reservation.slot_id)
           .single()
         if (slot) {
-          await supabase
+          await getSupabase()
             .from('reservation_slots')
             .update({ booked_count: Math.max(0, (slot.booked_count ?? 1) - 1) })
             .eq('id', reservation.slot_id)
@@ -1299,7 +1371,7 @@ async function createReminder(channelId: string, input: any): Promise<string> {
 
   const targetConfig: any = { type: target_type }
   if (target_type === 'tag' && tag_name) {
-    const { data: tag } = await supabase
+    const { data: tag } = await getSupabase()
       .from('tags')
       .select('id')
       .eq('channel_id', channelId)
@@ -1313,7 +1385,7 @@ async function createReminder(channelId: string, input: any): Promise<string> {
     targetConfig.friend_ids = friend_ids
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('reminders')
     .insert({
       channel_id: channelId,
@@ -1356,13 +1428,13 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
         { count: broadcastsTotal },
         { count: aiReplies },
       ] = await Promise.all([
-        supabase.from('friends').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('status', 'active'),
-        supabase.from('friends').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).gte('followed_at', todayStart),
-        supabase.from('friends').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).gte('followed_at', weekStart),
-        supabase.from('chat_messages').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('direction', 'inbound').gte('sent_at', todayStart),
-        supabase.from('chat_messages').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('direction', 'outbound').gte('sent_at', todayStart),
-        supabase.from('broadcasts').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('status', 'sent'),
-        supabase.from('chat_messages').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('direction', 'outbound').eq('message_type', 'ai_reply').gte('sent_at', todayStart),
+        getSupabase().from('friends').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('status', 'active'),
+        getSupabase().from('friends').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).gte('followed_at', todayStart),
+        getSupabase().from('friends').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).gte('followed_at', weekStart),
+        getSupabase().from('chat_messages').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('direction', 'inbound').gte('sent_at', todayStart),
+        getSupabase().from('chat_messages').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('direction', 'outbound').gte('sent_at', todayStart),
+        getSupabase().from('broadcasts').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('status', 'sent'),
+        getSupabase().from('chat_messages').select('id', { count: 'exact', head: true }).eq('channel_id', channelId).eq('direction', 'outbound').eq('message_type', 'ai_reply').gte('sent_at', todayStart),
       ])
 
       return `📊 サマリーレポート
@@ -1382,19 +1454,19 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
     }
 
     case 'friend_growth': {
-      const { count: total } = await supabase
+      const { count: total } = await getSupabase()
         .from('friends')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
         .eq('status', 'active')
 
-      const { count: newFriends } = await supabase
+      const { count: newFriends } = await getSupabase()
         .from('friends')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
         .gte('followed_at', since)
 
-      const { count: unfollowed } = await supabase
+      const { count: unfollowed } = await getSupabase()
         .from('friends')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
@@ -1406,7 +1478,7 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
     }
 
     case 'messages_sent': {
-      const { count } = await supabase
+      const { count } = await getSupabase()
         .from('chat_messages')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
@@ -1417,7 +1489,7 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
     }
 
     case 'messages_received': {
-      const { count } = await supabase
+      const { count } = await getSupabase()
         .from('chat_messages')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
@@ -1428,7 +1500,7 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
     }
 
     case 'broadcasts_sent': {
-      const { count } = await supabase
+      const { count } = await getSupabase()
         .from('broadcasts')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
@@ -1439,7 +1511,7 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
     }
 
     case 'url_clicks': {
-      const { count } = await supabase
+      const { count } = await getSupabase()
         .from('url_clicks')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
@@ -1449,7 +1521,7 @@ async function getAnalytics(channelId: string, input: any): Promise<string> {
     }
 
     case 'ai_replies': {
-      const { count } = await supabase
+      const { count } = await getSupabase()
         .from('chat_messages')
         .select('id', { count: 'exact', head: true })
         .eq('channel_id', channelId)
@@ -1474,7 +1546,7 @@ async function manageAiSettings(channelId: string, input: any): Promise<string> 
 
   switch (action) {
     case 'get': {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('ai_settings')
         .select('*')
         .eq('channel_id', channelId)
@@ -1501,21 +1573,21 @@ async function manageAiSettings(channelId: string, input: any): Promise<string> 
       if (Object.keys(updates).length === 0) return 'エラー: 更新する項目を指定してください。'
 
       // Upsert: try update first, then insert
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabase()
         .from('ai_settings')
         .select('id')
         .eq('channel_id', channelId)
         .single()
 
       if (existing) {
-        const { error } = await supabase
+        const { error } = await getSupabase()
           .from('ai_settings')
           .update(updates)
           .eq('channel_id', channelId)
 
         if (error) return `エラー: ${error.message}`
       } else {
-        const { error } = await supabase
+        const { error } = await getSupabase()
           .from('ai_settings')
           .insert({ channel_id: channelId, ...updates })
 
@@ -1546,7 +1618,7 @@ async function manageKnowledge(channelId: string, input: any): Promise<string> {
 
   switch (action) {
     case 'list': {
-      let q = supabase
+      let q = getSupabase()
         .from('knowledge_base')
         .select('id, category, title, created_at, updated_at')
         .eq('channel_id', channelId)
@@ -1579,7 +1651,7 @@ async function manageKnowledge(channelId: string, input: any): Promise<string> {
     case 'add': {
       if (!title || !content) return 'エラー: タイトルと内容を指定してください。'
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('knowledge_base')
         .insert({
           channel_id: channelId,
@@ -1603,7 +1675,7 @@ async function manageKnowledge(channelId: string, input: any): Promise<string> {
       if (content) updates.content = content
       updates.updated_at = new Date().toISOString()
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('knowledge_base')
         .update(updates)
         .eq('id', knowledge_id)
@@ -1616,7 +1688,7 @@ async function manageKnowledge(channelId: string, input: any): Promise<string> {
     case 'delete': {
       if (!knowledge_id) return 'エラー: ナレッジIDを指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('knowledge_base')
         .delete()
         .eq('id', knowledge_id)
@@ -1646,7 +1718,7 @@ async function ecGetOrders(channelId: string, input: any): Promise<string> {
     resolvedFriendId = friend.id
   }
 
-  let query = supabase
+  let query = getSupabase()
     .from('ec_orders')
     .select(`
       id, external_order_id, platform, status, total_amount, currency, ordered_at, shipping_status,
@@ -1692,7 +1764,7 @@ async function ecGetOrderDetail(channelId: string, input: any): Promise<string> 
 
   if (!order_id && !external_order_id) return 'エラー: 注文IDまたは外部注文IDを指定してください。'
 
-  let query = supabase
+  let query = getSupabase()
     .from('ec_orders')
     .select(`
       id, external_order_id, platform, status, total_amount, currency, ordered_at,
@@ -1766,7 +1838,7 @@ async function ecGetCustomerProfile(channelId: string, input: any): Promise<stri
   if (!friend) return `エラー: 友だちが見つかりません。`
 
   // Get customer link
-  const { data: link } = await supabase
+  const { data: link } = await getSupabase()
     .from('ec_customer_links')
     .select('id, email, phone, tier, total_spent, order_count, first_order_at, last_order_at, linked_at')
     .eq('channel_id', channelId)
@@ -1776,7 +1848,7 @@ async function ecGetCustomerProfile(channelId: string, input: any): Promise<stri
   if (!link) return `${friend.display_name} さんはEC顧客として紐付けされていません。`
 
   // Get recent orders with items
-  const { data: orders } = await supabase
+  const { data: orders } = await getSupabase()
     .from('ec_orders')
     .select(`
       id, external_order_id, platform, status, total_amount, ordered_at,
@@ -1824,7 +1896,7 @@ async function ecLinkCustomer(channelId: string, input: any): Promise<string> {
   if (!friend) return `エラー: 友だちが見つかりません。`
 
   // Check if already linked
-  const { data: existing } = await supabase
+  const { data: existing } = await getSupabase()
     .from('ec_customer_links')
     .select('id')
     .eq('channel_id', channelId)
@@ -1834,7 +1906,7 @@ async function ecLinkCustomer(channelId: string, input: any): Promise<string> {
   if (existing) return `${friend.display_name} さんは既にEC顧客として紐付けされています（ID: ${existing.id}）。`
 
   // Create link
-  const { data: link, error } = await supabase
+  const { data: link, error } = await getSupabase()
     .from('ec_customer_links')
     .insert({
       channel_id: channelId,
@@ -1864,7 +1936,7 @@ async function ecSendShippingNotification(channelId: string, input: any): Promis
   if (!order_id) return 'エラー: 注文IDを指定してください。'
 
   // Get order with customer info
-  const { data: order, error } = await supabase
+  const { data: order, error } = await getSupabase()
     .from('ec_orders')
     .select(`
       id, external_order_id, status,
@@ -1897,7 +1969,7 @@ async function ecSendShippingNotification(channelId: string, input: any): Promis
 
   // Send via LINE
   try {
-    await lineClient.pushMessage({
+    await getLineClient().pushMessage({
       to: lineUserId,
       messages: [{ type: 'text', text: message }]
     })
@@ -1910,13 +1982,13 @@ async function ecSendShippingNotification(channelId: string, input: any): Promis
   if (tracking_number) updateData.tracking_number = tracking_number
   if (carrier) updateData.carrier = carrier
 
-  await supabase
+  await getSupabase()
     .from('ec_orders')
     .update(updateData)
     .eq('id', order_id)
 
   // Save outbound message
-  await supabase.from('chat_messages').insert({
+  await getSupabase().from('chat_messages').insert({
     channel_id: channelId,
     friend_id: friendId,
     direction: 'outbound',
@@ -1942,7 +2014,7 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
 
   switch (action) {
     case 'list_pending': {
-      let query = supabase
+      let query = getSupabase()
         .from('ec_followup_jobs')
         .select(`
           id, job_type, status, message, scheduled_at,
@@ -1976,7 +2048,7 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
 
       const scheduledDate = scheduled_at ? new Date(scheduled_at).toISOString() : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
 
-      const { data: order } = await supabase
+      const { data: order } = await getSupabase()
         .from('ec_orders')
         .select('id, ec_customer_links(friend_id)')
         .eq('id', order_id)
@@ -1987,7 +2059,7 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
 
       const resolvedFriendId = (order as any).ec_customer_links?.friend_id || friend_id
 
-      const { data: job, error } = await supabase
+      const { data: job, error } = await getSupabase()
         .from('ec_followup_jobs')
         .insert({
           channel_id: channelId,
@@ -2009,7 +2081,7 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
     case 'cancel': {
       if (!job_id) return 'エラー: ジョブIDを指定してください。'
 
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from('ec_followup_jobs')
         .update({ status: 'cancelled' })
         .eq('id', job_id)
@@ -2025,7 +2097,7 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
       if (!job_id) return 'エラー: ジョブIDを指定してください。'
 
       // Get job with order and friend info
-      const { data: job, error } = await supabase
+      const { data: job, error } = await getSupabase()
         .from('ec_followup_jobs')
         .select(`
           id, job_type, message, friend_id,
@@ -2069,7 +2141,7 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
 
       // Send via LINE
       try {
-        await lineClient.pushMessage({
+        await getLineClient().pushMessage({
           to: lineUserId,
           messages: [{ type: 'text', text: sendMessage }]
         })
@@ -2078,13 +2150,13 @@ async function ecManageFollowup(channelId: string, input: any): Promise<string> 
       }
 
       // Update job status
-      await supabase
+      await getSupabase()
         .from('ec_followup_jobs')
         .update({ status: 'sent', sent_at: new Date().toISOString() })
         .eq('id', job_id)
 
       // Save outbound message
-      await supabase.from('chat_messages').insert({
+      await getSupabase().from('chat_messages').insert({
         channel_id: channelId,
         friend_id: j.friend_id,
         direction: 'outbound',
@@ -2142,7 +2214,7 @@ async function ecGetStats(channelId: string, input: any): Promise<string> {
   const start = getPeriodStart(period || 'month')
 
   // Total orders and revenue in period
-  const { data: orders, error } = await supabase
+  const { data: orders, error } = await getSupabase()
     .from('ec_orders')
     .select('id, status, total_amount, platform, ordered_at, customer_link_id')
     .eq('channel_id', channelId)
@@ -2180,7 +2252,7 @@ async function ecGetStats(channelId: string, input: any): Promise<string> {
   const repeatRate = uniqueCustomers > 0 ? Math.round((repeatCustomers / uniqueCustomers) * 100) : 0
 
   // Customer tier distribution
-  const { data: links } = await supabase
+  const { data: links } = await getSupabase()
     .from('ec_customer_links')
     .select('tier')
     .eq('channel_id', channelId)
@@ -2235,7 +2307,7 @@ async function ecGetProducts(channelId: string, input: any): Promise<string> {
   const limit = input.limit ?? 20
 
   // Get store credentials
-  let storeQuery = supabase
+  let storeQuery = getSupabase()
     .from('ec_stores')
     .select('*')
     .eq('channel_id', channelId)
@@ -2291,7 +2363,7 @@ ${lines.join('\n\n')}`
 async function ecGetStorePages(channelId: string, input: any): Promise<string> {
   const storeId = input.store_id
 
-  let storeQuery = supabase
+  let storeQuery = getSupabase()
     .from('ec_stores')
     .select('*')
     .eq('channel_id', channelId)
@@ -2470,7 +2542,7 @@ async function importFriendsFromCSV(
 
   // Step 1: Ensure tags exist
   const uniqueTagNames = tagColumns.map((t) => t.name)
-  const { data: existingTags } = await supabase
+  const { data: existingTags } = await getSupabase()
     .from('tags')
     .select('id, name')
     .eq('channel_id', channelId)
@@ -2489,7 +2561,7 @@ async function importFriendsFromCSV(
 
     for (let i = 0; i < tagsToInsert.length; i += 50) {
       const batch = tagsToInsert.slice(i, i + 50)
-      const { data: inserted } = await supabase
+      const { data: inserted } = await getSupabase()
         .from('tags')
         .upsert(batch, { onConflict: 'channel_id,name' })
         .select('id, name')
@@ -2502,10 +2574,19 @@ async function importFriendsFromCSV(
     }
   }
 
-  // Step 2: Import friends
-  let imported = 0
+  // Step 2: Parse all rows and prepare batch data
+  interface FriendRow {
+    channel_id: string
+    line_user_id: string
+    display_name: string
+    status: string
+    followed_at: string
+    custom_fields: Record<string, string> | null
+    _tagFlags: { name: string; active: boolean }[]
+  }
+
+  const friendRows: FriendRow[] = []
   let skipped = 0
-  let tagLinks = 0
 
   for (const line of dataRows) {
     const cols = parseCSVLineExec(line)
@@ -2534,51 +2615,77 @@ async function importFriendsFromCSV(
     addField('building', idxBuilding)
     addField('memo', idxMemo)
 
-    const { data: friend, error: friendError } = await supabase
-      .from('friends')
-      .upsert(
-        {
-          channel_id: channelId,
-          line_user_id: lineUserId,
-          display_name: displayName,
-          status: 'active',
-          followed_at: followedAt
-            ? new Date(followedAt).toISOString()
-            : new Date().toISOString(),
-          custom_fields:
-            Object.keys(customFields).length > 0 ? customFields : null,
-        },
-        { onConflict: 'channel_id,line_user_id' }
-      )
-      .select('id')
-      .single()
+    const tagFlags = tagColumns.map((tc) => ({
+      name: tc.name,
+      active: cols[tc.index]?.trim() === '1',
+    }))
 
-    if (friendError) {
-      skipped++
+    friendRows.push({
+      channel_id: channelId,
+      line_user_id: lineUserId,
+      display_name: displayName,
+      status: 'active',
+      followed_at: followedAt
+        ? new Date(followedAt).toISOString()
+        : new Date().toISOString(),
+      custom_fields:
+        Object.keys(customFields).length > 0 ? customFields : null,
+      _tagFlags: tagFlags,
+    })
+  }
+
+  // Step 3: Batch upsert friends (200 at a time)
+  const BATCH_SIZE = 200
+  let imported = 0
+  let tagLinks = 0
+
+  // Map line_user_id → tagFlags for later tag linking
+  const tagFlagsByUserId = new Map<string, { name: string; active: boolean }[]>()
+  for (const row of friendRows) {
+    tagFlagsByUserId.set(row.line_user_id, row._tagFlags)
+  }
+
+  for (let i = 0; i < friendRows.length; i += BATCH_SIZE) {
+    const batch = friendRows.slice(i, i + BATCH_SIZE).map(
+      ({ _tagFlags, ...rest }) => rest
+    )
+
+    const { data: upserted, error } = await getSupabase()
+      .from('friends')
+      .upsert(batch, { onConflict: 'channel_id,line_user_id' })
+      .select('id, line_user_id')
+
+    if (error) {
+      skipped += batch.length
       continue
     }
 
-    imported++
+    imported += (upserted ?? []).length
 
-    // Assign tags
-    const friendTagInserts: { friend_id: string; tag_id: string }[] = []
-    for (const tc of tagColumns) {
-      const val = cols[tc.index]?.trim()
-      if (val === '1') {
-        const tagId = existingTagMap.get(tc.name)
-        if (tagId) {
-          friendTagInserts.push({ friend_id: friend.id, tag_id: tagId })
+    // Build tag link inserts for this batch
+    const allTagInserts: { friend_id: string; tag_id: string }[] = []
+    for (const friend of upserted ?? []) {
+      const flags = tagFlagsByUserId.get(friend.line_user_id)
+      if (!flags) continue
+      for (const f of flags) {
+        if (f.active) {
+          const tagId = existingTagMap.get(f.name)
+          if (tagId) {
+            allTagInserts.push({ friend_id: friend.id, tag_id: tagId })
+          }
         }
       }
     }
 
-    if (friendTagInserts.length > 0) {
-      const { error: tagError } = await supabase
+    // Batch upsert tag links (200 at a time)
+    for (let t = 0; t < allTagInserts.length; t += BATCH_SIZE) {
+      const tagBatch = allTagInserts.slice(t, t + BATCH_SIZE)
+      const { error: tagError } = await getSupabase()
         .from('friend_tags')
-        .upsert(friendTagInserts, { onConflict: 'friend_id,tag_id' })
+        .upsert(tagBatch, { onConflict: 'friend_id,tag_id' })
 
       if (!tagError) {
-        tagLinks += friendTagInserts.length
+        tagLinks += tagBatch.length
       }
     }
   }

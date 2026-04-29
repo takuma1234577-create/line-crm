@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import * as tiktokShop from '@/lib/tiktok/shop'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function GET(request: NextRequest) {
   const storeId = request.nextUrl.searchParams.get('store_id')
 
-  let query = supabase
+  let query = getSupabase()
     .from('channel_products')
     .select('*, amazon_products(id, asin, title, fulfillable_qty)')
     .order('title')
@@ -25,7 +31,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const { store_id } = await request.json()
 
-  const { data: store } = await supabase
+  const { data: store } = await getSupabase()
     .from('channel_stores')
     .select('*')
     .eq('id', store_id)
@@ -46,7 +52,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unsupported channel' }, { status: 400 })
     }
 
-    await supabase
+    await getSupabase()
       .from('channel_stores')
       .update({ last_synced_at: new Date().toISOString() })
       .eq('id', store_id)
@@ -66,7 +72,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from('channel_products')
     .update({
       amazon_product_id,
@@ -100,7 +106,7 @@ async function syncShopifyProducts(store: any): Promise<number> {
 
   for (const product of products) {
     for (const variant of product.variants) {
-      await supabase.from('channel_products').upsert(
+      await getSupabase().from('channel_products').upsert(
         {
           store_id: store.id,
           channel: 'shopify',
@@ -138,7 +144,7 @@ async function syncTikTokProducts(store: any): Promise<number> {
     const skus = product.skus || [{ id: product.id, seller_sku: '', stock_infos: [] }]
     for (const sku of skus) {
       const stock = sku.stock_infos?.[0]?.available_stock ?? null
-      await supabase.from('channel_products').upsert(
+      await getSupabase().from('channel_products').upsert(
         {
           store_id: store.id,
           channel: 'tiktok',

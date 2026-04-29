@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import * as tiktokShop from '@/lib/tiktok/shop'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function POST() {
   // Get all channel_products that have inventory sync enabled and ASIN mapped
-  const { data: products } = await supabase
+  const { data: products } = await getSupabase()
     .from('channel_products')
     .select('*, amazon_products(id, asin, fulfillable_qty)')
     .eq('sync_inventory', true)
@@ -21,7 +27,7 @@ export async function POST() {
 
   // Group by store for efficient API calls
   const storeIds = [...new Set(products.map((p) => p.store_id))]
-  const { data: stores } = await supabase
+  const { data: stores } = await getSupabase()
     .from('channel_stores')
     .select('*')
     .in('id', storeIds)
@@ -52,7 +58,7 @@ export async function POST() {
       }
 
       // Update local record
-      await supabase
+      await getSupabase()
         .from('channel_products')
         .update({
           current_stock: fbaStock,
@@ -61,7 +67,7 @@ export async function POST() {
         .eq('id', product.id)
 
       // Log the sync
-      await supabase.from('inventory_sync_logs').insert({
+      await getSupabase().from('inventory_sync_logs').insert({
         channel_product_id: product.id,
         amazon_product_id: product.amazon_product_id,
         previous_stock: previousStock,

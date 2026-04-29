@@ -1,18 +1,30 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { messagingApi } from '@line/bot-sdk'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
-const lineClient = new messagingApi.MessagingApiClient({
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
-})
+let _lineClient: messagingApi.MessagingApiClient | null = null
+function getLineClient() {
+  if (!_lineClient) {
+    _lineClient = new messagingApi.MessagingApiClient({
+      channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN!,
+    })
+  }
+  return _lineClient
+}
 
 // Schedule followup jobs for a new order
 export async function scheduleFollowups(orderId: string) {
-  const { data: order } = await supabase
+  const { data: order } = await getSupabase()
     .from('ec_orders')
     .select('*, ec_order_items(*), friends(id, line_user_id, display_name)')
     .eq('id', orderId)
@@ -84,7 +96,7 @@ export async function scheduleFollowups(orderId: string) {
     status: 'scheduled',
   })
 
-  await supabase.from('ec_followup_jobs').insert(jobs)
+  await getSupabase().from('ec_followup_jobs').insert(jobs)
 }
 
 // Process pending followup jobs (called by cron)
@@ -92,7 +104,7 @@ export async function processFollowupJobs(): Promise<{ sent: number; failed: num
   let sent = 0
   let failed = 0
 
-  const { data: jobs } = await supabase
+  const { data: jobs } = await getSupabase()
     .from('ec_followup_jobs')
     .select('*, friends(line_user_id)')
     .eq('status', 'scheduled')
@@ -105,31 +117,31 @@ export async function processFollowupJobs(): Promise<{ sent: number; failed: num
     try {
       const lineUserId = (job as any).friends?.line_user_id
       if (!lineUserId) {
-        await supabase.from('ec_followup_jobs').update({ status: 'failed' }).eq('id', job.id)
+        await getSupabase().from('ec_followup_jobs').update({ status: 'failed' }).eq('id', job.id)
         failed++
         continue
       }
 
       // Check if order was cancelled
-      const { data: order } = await supabase
+      const { data: order } = await getSupabase()
         .from('ec_orders')
         .select('order_status')
         .eq('id', job.order_id)
         .single()
 
       if (order?.order_status === 'cancelled' || order?.order_status === 'returned') {
-        await supabase.from('ec_followup_jobs').update({ status: 'cancelled' }).eq('id', job.id)
+        await getSupabase().from('ec_followup_jobs').update({ status: 'cancelled' }).eq('id', job.id)
         continue
       }
 
       // Send LINE message
-      await lineClient.pushMessage({
+      await getLineClient().pushMessage({
         to: lineUserId,
         messages: [{ type: 'text', text: job.message }],
       })
 
       // Store in chat_messages
-      await supabase.from('chat_messages').insert({
+      await getSupabase().from('chat_messages').insert({
         channel_id: job.channel_id,
         friend_id: job.friend_id,
         direction: 'outbound',
@@ -137,7 +149,7 @@ export async function processFollowupJobs(): Promise<{ sent: number; failed: num
         content: { text: job.message },
       })
 
-      await supabase
+      await getSupabase()
         .from('ec_followup_jobs')
         .update({ status: 'sent', sent_at: new Date().toISOString() })
         .eq('id', job.id)
@@ -145,7 +157,7 @@ export async function processFollowupJobs(): Promise<{ sent: number; failed: num
       sent++
     } catch (err) {
       console.error('[followup] job error:', err)
-      await supabase.from('ec_followup_jobs').update({ status: 'failed' }).eq('id', job.id)
+      await getSupabase().from('ec_followup_jobs').update({ status: 'failed' }).eq('id', job.id)
       failed++
     }
   }

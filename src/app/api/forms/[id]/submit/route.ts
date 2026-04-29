@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 export async function POST(
   request: NextRequest,
@@ -14,7 +20,7 @@ export async function POST(
 
   try {
     // Validate form exists and is active
-    const { data: form, error: formError } = await supabase
+    const { data: form, error: formError } = await getSupabase()
       .from('forms')
       .select('*')
       .eq('id', formId)
@@ -39,7 +45,7 @@ export async function POST(
     }
 
     // Insert the form submission
-    const { data: submission, error: insertError } = await supabase
+    const { data: submission, error: insertError } = await getSupabase()
       .from('form_submissions')
       .insert({
         form_id: formId,
@@ -65,7 +71,7 @@ export async function POST(
           switch (action.type) {
             case 'add_tag': {
               if (friendId && action.tag_id) {
-                await supabase.from('friend_tags').upsert(
+                await getSupabase().from('friend_tags').upsert(
                   {
                     friend_id: friendId,
                     tag_id: action.tag_id,
@@ -79,7 +85,7 @@ export async function POST(
             case 'enroll_sequence': {
               if (friendId && action.sequence_id) {
                 // Get the first step to determine initial next_send_at
-                const { data: firstStep } = await supabase
+                const { data: firstStep } = await getSupabase()
                   .from('step_messages')
                   .select('delay_minutes')
                   .eq('sequence_id', action.sequence_id)
@@ -92,7 +98,7 @@ export async function POST(
                   Date.now() + delayMinutes * 60 * 1000
                 ).toISOString()
 
-                await supabase.from('step_enrollments').upsert(
+                await getSupabase().from('step_enrollments').upsert(
                   {
                     sequence_id: action.sequence_id,
                     friend_id: friendId,

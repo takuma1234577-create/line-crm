@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import iconv from 'iconv-lite'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+let _supabase: SupabaseClient | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    )
+  }
+  return _supabase
+}
 
 const CHANNEL_ID = '00000000-0000-0000-0000-000000000010'
 
@@ -106,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     // Step 1: Ensure all tags exist in DB
     const uniqueTagNames = tagColumns.map((t) => t.name)
-    const { data: existingTags } = await supabase
+    const { data: existingTags } = await getSupabase()
       .from('tags')
       .select('id, name')
       .eq('channel_id', CHANNEL_ID)
@@ -127,7 +133,7 @@ export async function POST(request: NextRequest) {
       // Insert in batches of 50
       for (let i = 0; i < tagsToInsert.length; i += 50) {
         const batch = tagsToInsert.slice(i, i + 50)
-        const { data: inserted, error } = await supabase
+        const { data: inserted, error } = await getSupabase()
           .from('tags')
           .upsert(batch, { onConflict: 'channel_id,name' })
           .select('id, name')
@@ -178,7 +184,7 @@ export async function POST(request: NextRequest) {
       addMeta('memo', idxMemo)
 
       // Upsert friend
-      const { data: friend, error: friendError } = await supabase
+      const { data: friend, error: friendError } = await getSupabase()
         .from('friends')
         .upsert(
           {
@@ -217,7 +223,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (friendTagInserts.length > 0) {
-        const { error: tagError } = await supabase
+        const { error: tagError } = await getSupabase()
           .from('friend_tags')
           .upsert(friendTagInserts, { onConflict: 'friend_id,tag_id' })
 
